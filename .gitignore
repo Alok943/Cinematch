@@ -1,0 +1,17 @@
+# Python junk
+__pycache__/
+*.py[cod]
+.env
+.ipynb_checkpoints/
+
+# Data (NEVER COMMIT THESE)
+data/
+models/
+*.csv
+*.tsv
+*.pkl
+*.json
+
+# VS Code / IDE
+.vscode/
+.idea/
