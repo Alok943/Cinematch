@@ -5,6 +5,7 @@ __pycache__/
 .ipynb_checkpoints/
 
 # Data (NEVER COMMIT THESE)
+chroma_db/
 data/
 models/
 *.csv
@@ -15,3 +16,6 @@ models/
 # VS Code / IDE
 .vscode/
 .idea/
+
+#converstaions
+talks/
