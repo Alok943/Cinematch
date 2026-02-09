@@ -1,0 +1,75 @@
+TEST: 1. Database Connection & Collection Name
+============================================================
+2026-02-09 06:21:56.738 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-02-09 06:21:56.834
+  Warning: to view this Streamlit app on a browser, run it with the following
+  command:
+
+    streamlit run verify_core_logic.py [ARGUMENTS]
+2026-02-09 06:21:56.834 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-02-09 06:21:56.835 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-02-09 06:21:56.835 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-02-09 06:21:57.032 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-02-09 06:21:57.032 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-02-09 06:21:57.033 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+Status: Connected to ChromaDB at ../chroma_db. Index contains 51,191 movies.
+Collection Count: 51191
+✅ Connection Successful.
+
+============================================================
+TEST: 2. Distance vs Similarity Sanity Check
+============================================================
+running search for 'love' to trigger your debug prints...
+2026-02-09 06:21:57.485 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-02-09 06:21:57.485 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-02-09 06:21:57.486 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-02-09 06:21:57.486 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-02-09 06:21:57.994 Thread 'Thread-3': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-02-09 06:21:57.994 Thread 'Thread-3': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-02-09 06:21:57.995 Thread 'Thread-3': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+Loading weights: 100%|████████████████████| 103/103 [00:00<00:00, 2834.97it/s, Materializing param=pooler.dense.weight]
+BertModel LOAD REPORT from: sentence-transformers/all-MiniLM-L6-v2
+Key                     | Status     |  |
+------------------------+------------+--+-
+embeddings.position_ids | UNEXPECTED |  |
+
+Notes:
+- UNEXPECTED    :can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+2026-02-09 06:22:01.291 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-02-09 06:22:01.291 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-02-09 06:22:01.292 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+DEBUG: Sample distances: [0.5531234741210938, 0.56110680103302, 0.5690537095069885]
+DEBUG: Sample similarities: [0.44687652587890625, 0.43889319896698, 0.4309462904930115]
+
+Top Result: Love( ) Mave
+Score: 0.447
+✅ Score is within valid bounds (0.0 - 1.0).
+👉 CHECK CONSOLE ABOVE: If 'Sample distances' were ~0.3-0.8, you are good.
+👉 If 'Sample distances' were > 1.0 or < 0, logic is wrong.
+
+============================================================
+TEST: 3. Empty Query (Popularity Fallback)
+============================================================
+Searching with query='' (Should return popular movies)...
+Vote Counts returned: [34495, 32571, 30619, 29815, 29166]
+✅ SUCCESS: Results are sorted by popularity (vote_count).
+
+============================================================
+TEST: 4. Sort By 'Rating'
+============================================================
+Searching 'action', sort_by='rating'...
+DEBUG: Sample distances: [0.49512988328933716, 0.5151894688606262, 0.5866435170173645]
+DEBUG: Sample similarities: [0.5048701167106628, 0.4848105311393738, 0.4133564829826355]
+Ratings: [7.1, 6.4, 6.3, 5.9, 5.8]
+Votes:   [230, 391, 138, 512, 422]
+✅ SUCCESS: Results sorted by rating AND verify vote_count > 100.
+
+============================================================
+TEST: 5. Min Rating Filter (>= 8.0)
+============================================================
+DEBUG: Sample distances: [0.6197798848152161, 0.6322194337844849, 0.6436702013015747]
+DEBUG: Sample similarities: [0.38022011518478394, 0.36778056621551514, 0.3563297986984253]
+Result Ratings: [9.0, 9.0, 9.0, 8.3, 10.0]
+✅ SUCCESS: All results are >= 8.0.
+
+✅✅ VERIFICATION COMPLETE ✅✅
