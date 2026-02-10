@@ -11,7 +11,7 @@ from datetime import datetime
 API_KEY = "9a7f2c468ef72e78bb6f619bea50488b"
 
 # File path
-FILE_PATH = "data/processed/movies_merged.csv"
+FILE_PATH = "data/raw/movies_clean.csv"
 
 def get_session():
     """
@@ -64,7 +64,6 @@ def fetch_new_movies(pages_to_fetch=5):
     """
     Fetches Popular movies from TMDb with FULL metadata 
     (keywords, taglines, genres) to match your schema.
-    Only adds movies with status='Released'.
     """
     session = get_session()
     print(f"\n🚀 Fetching {pages_to_fetch} pages of popular movies...")
@@ -83,12 +82,12 @@ def fetch_new_movies(pages_to_fetch=5):
                 continue
                 
             results = response.json().get('results', [])
-            print(f"   Processing Page {page}/{pages_to_fetch} ({len(results)} movies found)...")
+            print(f"   Processing Page {page}/{pages_to_fetch} ({len(results)} movies)...")
             
             for movie in results:
                 movie_id = movie['id']
                 
-                # 🛑 DETAILS FETCH: Call specific ID to get keywords/tagline AND STATUS
+                # 🛑 DETAILS FETCH: Call specific ID to get keywords/tagline
                 details_url = f"https://api.themoviedb.org/3/movie/{movie_id}"
                 details_params = {"api_key": API_KEY, "append_to_response": "keywords"}
                 
@@ -96,12 +95,6 @@ def fetch_new_movies(pages_to_fetch=5):
                     details_resp = session.get(details_url, params=details_params, timeout=5)
                     details = details_resp.json()
                     
-                    # --- 🛡️ FILTER: STATUS CHECK ---
-                    movie_status = details.get('status', 'Unknown')
-                    if movie_status != 'Released':
-                        # print(f"      ↪ Skipping '{movie.get('title')}' (Status: {movie_status})")
-                        continue
-
                     # Extract Keywords
                     k_list = [k['name'] for k in details.get('keywords', {}).get('keywords', [])]
                     keywords_str = ", ".join(k_list)
@@ -152,15 +145,15 @@ def fetch_new_movies(pages_to_fetch=5):
             
         combined_df.to_csv(FILE_PATH, index=False)
         print(f"\n✅ SUCCESS! Database updated.")
-        print(f"   Added/Updated {len(new_df)} RELEASED movies.")
+        print(f"   Added/Updated {len(new_df)} movies.")
         print(f"   Total movies now: {len(combined_df)}")
     else:
-        print("❌ No new released movies fetched.")
+        print("❌ No movies fetched.")
 
 # --- MENU ---
 if __name__ == "__main__":
     print("1. Check Latest Movie in DB")
-    print("2. Fetch New Popular Movies (Released Only)")
+    print("2. Fetch New Popular Movies")
     choice = input("Enter choice (1 or 2): ")
     
     if choice == "1":
