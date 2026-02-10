@@ -17,7 +17,6 @@ st.set_page_config(
 )
 
 # --- CSS STYLING ---
-# Forces the movie cards to look clean and uniform
 st.markdown("""
     <style>
     .movie-card {
@@ -50,8 +49,9 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- SESSION STATE MANAGEMENT ---
-# We use this to track if the user clicked "Find Similar"
+# --- HELPER FUNCTIONS & STATE ---
+
+# Initialize state
 if 'target_movie_id' not in st.session_state:
     st.session_state['target_movie_id'] = None
 
@@ -59,19 +59,21 @@ def clear_target_movie():
     """Reset the 'Find Similar' state when user searches manually"""
     st.session_state['target_movie_id'] = None
 
+def set_target_movie(movie_id):
+    """Callback to update session state for 'Find Similar'"""
+    st.session_state['target_movie_id'] = movie_id
+
 # --- SIDEBAR FILTERS ---
 with st.sidebar:
     st.title("🎬 Cinematch")
     
     # 1. Search Bar
-    # on_change=clear_target_movie ensures that if you type, we stop looking for "Similar to X"
     query = st.text_input("Search Movies", placeholder="e.g., sad robots, heist movie...", on_change=clear_target_movie)
     
     st.markdown("---")
     
     # 2. Filters
     with st.expander("🔍 Filters", expanded=True):
-        # Genre Mapping (Manual for now, ideally fetched from DB stats)
         GENRE_MAP = {
             28: "Action", 12: "Adventure", 16: "Animation", 35: "Comedy",
             80: "Crime", 99: "Documentary", 18: "Drama", 10751: "Family",
@@ -79,16 +81,13 @@ with st.sidebar:
             9648: "Mystery", 10749: "Romance", 878: "Sci-Fi", 10770: "TV Movie",
             53: "Thriller", 10752: "War", 37: "Western"
         }
-        # Invert map for UI
         GENRE_NAME_TO_ID = {v: k for k, v in GENRE_MAP.items()}
         
         selected_genres = st.multiselect("Genres", options=sorted(GENRE_NAME_TO_ID.keys()))
         genre_ids = [GENRE_NAME_TO_ID[name] for name in selected_genres]
         
         min_rating = st.slider("Minimum Rating", 0.0, 10.0, 0.0, 0.5)
-        
         year_range = st.slider("Release Year", 1900, 2025, (1970, 2025))
-        
         safe_search = st.toggle("Safe Search (Hide Adult)", value=False)
 
     st.markdown("---")
@@ -99,10 +98,8 @@ with st.sidebar:
             "Popularity Boost", 0.0, 0.5, 0.0, 0.05, 
             help="Higher values favor popular movies over exact text matches."
         )
-        
         sort_options = ["relevance", "rating", "popularity", "newest"]
         sort_by = st.selectbox("Sort By", sort_options, index=0)
-        
         n_results = st.number_input("Results Count", 5, 50, 20)
 
     # 4. Database Status Footer
@@ -114,15 +111,14 @@ with st.sidebar:
     else:
         st.error("🔴 Database Error")
         st.caption(msg)
-        st.stop() # Stop execution if DB is dead
+        st.stop()
 
 # --- MAIN SEARCH LOGIC ---
 
-# Logic: If 'target_movie_id' is set, we ignore the text box and find similar.
-# Otherwise, we use the text box.
 if st.session_state['target_movie_id']:
+    # CASE 1: "Find Similar" Mode
     st.info(f"Showing movies similar to your selection. [Click here to clear](javascript:window.location.reload())")
-    # We pass the ID to the engine
+    
     results = query_engine.find_similar_movies(
         movie_id=st.session_state['target_movie_id'],
         filters={
@@ -136,7 +132,7 @@ if st.session_state['target_movie_id']:
     header_text = "More Like This..."
 
 else:
-    # Normal Search / Empty Search
+    # CASE 2: Text Search Mode
     results = query_engine.search_movies(
         query=query,
         filters={
@@ -155,28 +151,40 @@ else:
     else:
         header_text = "Popular Movies"
 
+# --- RE-RANKING (FIX FOR 'THE MARTIAN') ---
+# This ensures exact title matches appear at the top
+if results and query and not st.session_state['target_movie_id']:
+    for movie in results:
+        # Boost exact title match
+        if query.lower().strip() == movie['title'].lower().strip():
+             movie['score'] += 0.5
+        # Boost partial starts-with match
+        elif movie['title'].lower().startswith(query.lower().strip()):
+             movie['score'] += 0.1
+    
+    # Re-sort if we are sorting by relevance
+    if sort_by == "relevance":
+        results = sorted(results, key=lambda x: x['score'], reverse=True)
+
 # --- DISPLAY RESULTS ---
 st.subheader(header_text)
 
 if not results:
     st.warning("No movies found. Try adjusting your filters.")
 else:
-    # Create a grid of columns
-    cols = st.columns(4) # 4 columns wide
+    cols = st.columns(4) 
     
     for idx, movie in enumerate(results):
-        # Cycle through columns
         with cols[idx % 4]:
-            # --- POSTER LOGIC ---
+            # Poster Logic
             if movie['poster_path']:
                 poster_url = f"https://image.tmdb.org/t/p/w500{movie['poster_path']}"
             else:
                 poster_url = "https://via.placeholder.com/500x750?text=No+Poster"
             
-            # Display Image
             st.image(poster_url, use_container_width=True)
             
-            # Metadata
+            # Title & Metadata
             st.markdown(f"**{movie['title']}** ({movie['release_year']})")
             
             # Score Badge
@@ -185,13 +193,15 @@ else:
             else:
                 st.caption(f"⭐ {movie['vote_average']} | Votes: {movie['vote_count']}")
             
-            # "Find Similar" Button
-            # We use a callback to set the session state ID
-            if st.button("Find Similar", key=f"btn_{movie['id']}"):
-                st.session_state['target_movie_id'] = movie['id']
-                st.rerun()
+            # Button with Callback (FIXED)
+            st.button(
+                "Find Similar", 
+                key=f"btn_{movie['id']}", 
+                on_click=set_target_movie, 
+                args=(movie['id'],)
+            )
             
-            # Expander for Plot
+            # Overview Expander
             with st.expander("Overview"):
                 st.write(movie['overview'])
                 if movie.get('tagline'):

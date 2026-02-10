@@ -3,12 +3,11 @@ import streamlit as st
 import os
 
 # --- PATH CONFIGURATION ---
-# We check multiple possible locations for the database
 POSSIBLE_PATHS = [
-    "../data/chroma",       # Correct structure: running from src/
-    "./data/chroma",        # Running from root
-    "../chroma_db",         # Legacy location
-    "./chroma_db"           # Legacy location
+    "../data/chroma",       # Standard structure
+    "./data/chroma",        # Root execution
+    "../chroma_db",         # Legacy
+    "./chroma_db"           # Legacy
 ]
 
 CHROMA_PATH = None
@@ -17,7 +16,7 @@ for path in POSSIBLE_PATHS:
         CHROMA_PATH = path
         break
 
-# Fallback for error messaging
+# Fallback
 if CHROMA_PATH is None:
     CHROMA_PATH = "../data/chroma"
 
@@ -58,3 +57,28 @@ def get_collection_stats():
     if not collection:
         return {"count": 0}
     return {"count": collection.count()}
+
+# --- FIXED FUNCTION ---
+def get_movie_by_id(movie_id: str):
+    """
+    Retrieve a single movie's metadata by its ID.
+    Returns the metadata dict or None if not found.
+    """
+    try:
+        # Use the existing helper function instead of the missing Class
+        collection = get_collection()
+        if not collection:
+            return None
+
+        result = collection.get(
+            ids=[str(movie_id)], # Ensure ID is a string
+            include=["metadatas"]
+        )
+        
+        if result['ids'] and len(result['ids']) > 0:
+            return result['metadatas'][0]
+        return None
+        
+    except Exception as e:
+        print(f"Error fetching movie {movie_id}: {e}")
+        return None
