@@ -4,6 +4,8 @@ import streamlit as st
 from chroma_manager import get_collection
 import math
 import traceback
+import ast
+import re
 
 # Load model once and cache it
 @st.cache_resource
@@ -45,10 +47,127 @@ def _build_where_clause(filters):
     else:
         return {"$and": where_conditions}
 
+def _parse_list_from_metadata(value):
+    """Safely parse a stringified list from metadata (e.g., '[28, 12]')"""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value.startswith('['):
+        try:
+            return ast.literal_eval(value)
+        except:
+            return []
+    return []
+
+def _is_documentary_search(query):
+    """
+    Check if the user is explicitly searching for documentaries.
+    """
+    if not query:
+        return False
+    
+    doc_keywords = [
+        'documentary', 'documentaries', 'doc', 'real story', 
+        'true story', 'real life', 'based on true events',
+        'biography', 'biopic', 'historical account'
+    ]
+    
+    query_lower = query.lower()
+    return any(keyword in query_lower for keyword in doc_keywords)
+
+def _apply_documentary_penalty(movies, query, penalty_factor=0.3):
+    """
+    Reduce scores for documentaries unless explicitly searched for.
+    
+    Args:
+        movies: List of processed movie dicts
+        query: User's search query
+        penalty_factor: Score multiplier for docs (0.3 = 70% reduction)
+    
+    Returns:
+        Modified movies list with adjusted scores
+    """
+    if _is_documentary_search(query):
+        return movies  # No penalty if user wants documentaries
+    
+    DOCUMENTARY_ID = 99
+    
+    for movie in movies:
+        genre_ids = movie.get('genre_ids', [])
+        if DOCUMENTARY_ID in genre_ids:
+            movie['score'] = movie['score'] * penalty_factor
+            movie['is_penalized'] = True  # For debugging
+    
+    return movies
+
+def _process_results(raw_results, boost_weight, final_k, query=""):
+    """
+    Blends Semantic Score with Popularity and standardizes output keys.
+    """
+    processed_movies = []
+    
+    # Safety check for empty results
+    if not raw_results or not raw_results.get('ids') or not raw_results['ids'][0]:
+        return []
+        
+    ids = raw_results['ids'][0]
+    metadatas = raw_results['metadatas'][0]
+    distances = raw_results['distances'][0] if 'distances' in raw_results else [0]*len(ids)
+
+    # Calculate Max Popularity for normalization
+    batch_votes = [m.get('vote_count', 0) for m in metadatas]
+    max_vote = max(batch_votes) if batch_votes else 1
+    max_log_vote = math.log(max_vote + 1) if max_vote > 0 else 1
+
+    for i in range(len(ids)):
+        meta = metadatas[i]
+        
+        # 1. Semantic Score (1 - distance)
+        # Handle cases where distance might be missing (popular fetch)
+        sim_score = max(0, 1 - distances[i]) if i < len(distances) else 0
+        
+        # 2. Popularity Score
+        vote_count = meta.get('vote_count', 0)
+        pop_score = math.log(vote_count + 1)
+        norm_pop = pop_score / max_log_vote 
+
+        # 3. Blended Score
+        final_score = (sim_score * (1 - boost_weight)) + (norm_pop * boost_weight)
+
+        # 4. Data Extraction
+        # Ensure genre_ids is a list so app.py can map it
+        genre_ids = _parse_list_from_metadata(meta.get('genre_ids'))
+        
+        # Clean overview text
+        overview = meta.get('overview', '').strip()
+        if len(overview) > 200:
+            overview = overview[:197] + "..."
+        
+        processed_movies.append({
+            "id": ids[i],
+            "title": meta.get('title'),
+            "poster_path": meta.get('poster_path'),
+            "overview": overview,
+            "tagline": meta.get('tagline', ''),
+            "release_year": int(meta.get('release_year', 0)),
+            "release_date": meta.get('release_date', ''),
+            "genre_ids": genre_ids,
+            "vote_average": round(meta.get('vote_average', 0), 1),
+            "vote_count": int(vote_count),
+            "score": round(final_score, 3),
+            "is_penalized": False
+        })
+
+    # Apply documentary penalty BEFORE sorting
+    processed_movies = _apply_documentary_penalty(processed_movies, query)
+
+    # Sort by Blended Score
+    processed_movies.sort(key=lambda x: x['score'], reverse=True)
+    
+    return processed_movies[:final_k]
+
 def _fetch_popular_movies(filters, n_results):
     """
-    FALLBACK: When no text query is provided, fetch movies based on filters 
-    and sort by popularity.
+    FALLBACK: Fetch movies based on filters and sort by popularity.
     """
     collection = get_collection()
     if not collection: return []
@@ -58,42 +177,31 @@ def _fetch_popular_movies(filters, n_results):
     try:
         results = collection.get(
             where=where_clause,
-            limit=1000, 
+            limit=n_results * 2,
             include=['metadatas']
         )
         
-        processed = []
-        if results['metadatas']:
-            for meta in results['metadatas']:
-                processed.append({
-                    "id": str(meta.get('movie_id')),  # ← FIXED: Convert to string
-                    "title": meta.get('title'),
-                    "poster_path": meta.get('poster_path'),
-                    "overview": meta.get('overview'),
-                    "tagline": meta.get('tagline', ''),
-                    "release_year": int(meta.get('release_year', 0)),
-                    "genres": meta.get('genres_display', "Unknown"),
-                    "vote_average": round(meta.get('vote_average', 0), 1),
-                    "vote_count": meta.get('vote_count', 0),
-                    "score": 0.0, 
-                    "match_percentage": 0
-                })
-            
-        # Sort by popularity
+        # Mock wrapper to reuse _process_results logic
+        mock_results = {
+            'ids': [results['ids']],
+            'metadatas': [results['metadatas']],
+            'distances': [[1.0] * len(results['ids'])]
+        }
+        
+        processed = _process_results(mock_results, boost_weight=1.0, final_k=n_results, query="")
+        
+        # Explicit sort by vote count for popular view
         processed.sort(key=lambda x: x['vote_count'], reverse=True)
-        return processed[:n_results]
+        return processed
         
     except Exception as e:
         print(f"Popular Fetch Error: {e}")
         return []
 
 def search_movies(query, filters=None, boost_weight=0.0, sort_by="relevance", n_results=20):
-    """
-    Main search entry point.
-    """
     filters = filters or {}
     
-    # CASE 1: Empty Query
+    # CASE 1: Empty Query -> Popular
     if not query or query.strip() == "":
         return _fetch_popular_movies(filters, n_results)
         
@@ -106,9 +214,7 @@ def search_movies(query, filters=None, boost_weight=0.0, sort_by="relevance", n_
 
     try:
         query_vector = model.encode(query).tolist()
-        
-        # Over-fetch for re-ranking
-        fetch_k = n_results * 5 if (boost_weight > 0 or sort_by != "relevance") else n_results
+        fetch_k = n_results * 3
 
         results = collection.query(
             query_embeddings=[query_vector],
@@ -117,11 +223,12 @@ def search_movies(query, filters=None, boost_weight=0.0, sort_by="relevance", n_
             include=['metadatas', 'distances']
         )
         
-        candidates = _process_results(results, boost_weight, fetch_k)
+        # Pass query to _process_results for documentary penalty
+        candidates = _process_results(results, boost_weight, fetch_k, query=query)
         
         # Final Sorting
         if sort_by == "rating":
-            candidates = [c for c in candidates if c['vote_count'] > 100]
+            candidates = [c for c in candidates if c['vote_count'] > 50]
             candidates.sort(key=lambda x: x['vote_average'], reverse=True)
         elif sort_by == "popularity":
             candidates.sort(key=lambda x: x['vote_count'], reverse=True)
@@ -136,43 +243,22 @@ def search_movies(query, filters=None, boost_weight=0.0, sort_by="relevance", n_
         return []
 
 def find_similar_movies(movie_id, filters=None, n_results=20):
-    """
-    Finds movies similar to a specific movie_id using its vector.
-    """
     collection = get_collection()
-    if not collection: 
-        return []
+    if not collection: return []
 
     try:
-        # 1. Fetch source vector - ENSURE ID IS STRING
         movie_id_str = str(movie_id)
+        source = collection.get(ids=[movie_id_str], include=['embeddings'])
         
-        print(f"DEBUG: Searching for movie_id={movie_id_str}")
-        
-        source = collection.get(
-            ids=[movie_id_str], 
-            include=['embeddings', 'metadatas']
-        )
-        
-        print(f"DEBUG: Found IDs={source.get('ids', [])}")
-        
-        # Safety Check - Fixed!
-        if not source.get('ids') or len(source['ids']) == 0:
-            print(f"Error: Movie ID {movie_id_str} not found in collection.")
-            return []
-            
-        if source.get('embeddings') is None or len(source['embeddings']) == 0:
-            print(f"Error: Movie ID {movie_id_str} has no embedding.")
+        if not source.get('ids') or not source.get('embeddings'):
+            print(f"Error: Movie ID {movie_id_str} not found.")
             return []
             
         source_vector = source['embeddings'][0]
-        source_title = source['metadatas'][0].get('title', 'Unknown')
-        print(f"DEBUG: Retrieved embedding for '{source_title}'")
         
         filters = filters or {}
         where_clause = _build_where_clause(filters)
         
-        # 2. Query with that vector
         results = collection.query(
             query_embeddings=[source_vector],
             n_results=n_results + 5,
@@ -180,67 +266,13 @@ def find_similar_movies(movie_id, filters=None, n_results=20):
             include=['metadatas', 'distances']
         )
         
-        processed = _process_results(results, boost_weight=0, final_k=n_results + 5)
+        processed = _process_results(results, boost_weight=0, final_k=n_results + 5, query="")
         
-        # 3. Exclude the movie itself from results
+        # Exclude self
         filtered = [m for m in processed if str(m['id']) != movie_id_str]
-        
-        print(f"DEBUG: Returning {len(filtered)} similar movies")
         return filtered[:n_results]
 
     except Exception as e:
         print(f"Find Similar Error: {e}")
         traceback.print_exc()
         return []
-
-def _process_results(raw_results, boost_weight, final_k):
-    """
-    Blends Semantic Score with Popularity.
-    """
-    processed_movies = []
-    
-    # Safety check for empty results
-    if not raw_results or not raw_results['ids'] or len(raw_results['ids'][0]) == 0:
-        return []
-        
-    ids = raw_results['ids'][0]
-    metadatas = raw_results['metadatas'][0]
-    distances = raw_results['distances'][0]
-
-    # Calculate Max Popularity for normalization
-    batch_votes = [m.get('vote_count', 0) for m in metadatas]
-    max_vote = max(batch_votes) if batch_votes else 1
-    max_log_vote = math.log(max_vote + 1) if max_vote > 0 else 1
-
-    for i in range(len(ids)):
-        meta = metadatas[i]
-        
-        # 1. Semantic Score (1 - distance)
-        sim_score = max(0, 1 - distances[i])
-        
-        # 2. Popularity Score
-        vote_count = meta.get('vote_count', 0)
-        pop_score = math.log(vote_count + 1)
-        norm_pop = pop_score / max_log_vote 
-
-        # 3. Blended Score
-        final_score = (sim_score * (1 - boost_weight)) + (norm_pop * boost_weight)
-
-        processed_movies.append({
-            "id": ids[i],  # ← This is the ChromaDB ID (string like "157336")
-            "title": meta.get('title'),
-            "poster_path": meta.get('poster_path'),
-            "overview": meta.get('overview'),
-            "tagline": meta.get('tagline', ''),
-            "release_year": int(meta.get('release_year', 0)),
-            "genres": meta.get('genres_display', "Unknown"),
-            "vote_average": round(meta.get('vote_average', 0), 1),
-            "vote_count": int(vote_count),
-            "score": round(final_score, 3),
-            "match_percentage": int(final_score * 100)
-        })
-
-    # Sort by Blended Score
-    processed_movies.sort(key=lambda x: x['score'], reverse=True)
-    
-    return processed_movies[:final_k]
