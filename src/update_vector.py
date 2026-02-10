@@ -3,15 +3,15 @@ import chromadb
 from chromadb.utils import embedding_functions
 import numpy as np
 import os
-import os
 
 # Get the folder where this script lives (src)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Go UP one level ("..") to find the file in the project root
-DATA_PATH = r"C:\Users\aloks\Desktop\Cinematch_V2\data\processed\movies_filtered.csv"
-# Example: If the CSV is in a 'data' folder one level up:
-# DATA_PATH = os.path.join(SCRIPT_DIR, "..", "data", "movies_merged.csv")
+# Adjust this path if your folder structure is different
+DATA_PATH = r"C:\Users\aloks\Desktop\Cinematch_V2\data\processed\movies_merged.csv"
+# DATA_PATH = os.path.join(SCRIPT_DIR, "..", "data", "processed", "movies_merged.csv")
+
 # --- CONFIGURATION ---
 COLLECTION_NAME = "cine_match_v1"
 PERSIST_DIR = "./chroma_db"
@@ -73,6 +73,10 @@ def generate_super_string(row):
 
 def clean_and_prepare_data(csv_path):
     print("🧹 Loading and cleaning data...")
+    if not os.path.exists(csv_path):
+        print(f"❌ Error: File not found at {csv_path}")
+        return pd.DataFrame()
+
     df = pd.read_csv(csv_path, low_memory=False)
     
     # --- A. CRITICAL ID CLEANING ---
@@ -106,9 +110,7 @@ def clean_and_prepare_data(csv_path):
         df['release_year'] = 0
 
     # --- E. ADULT CONTENT ---
-    # We NO LONGER filter adult content here. We just clean the flag.
     if 'adult' in df.columns:
-        # Normalize to boolean
         df['adult'] = df['adult'].astype(str).str.lower() == 'true'
     else:
         df['adult'] = False
@@ -126,25 +128,28 @@ def build_vector_store():
         model_name="all-MiniLM-L6-v2"
     )
 
-    try:
-        client.delete_collection(COLLECTION_NAME)
-        print(f"🗑️  Deleted existing collection '{COLLECTION_NAME}'")
-    except:
-        pass
-
-    collection = client.create_collection(
+    # --- UPDATED LOGIC START ---
+    # We do NOT delete the collection anymore. 
+    # We use get_or_create_collection to attach to the existing one.
+    collection = client.get_or_create_collection(
         name=COLLECTION_NAME,
         embedding_function=embedding_func,
         metadata={"hnsw:space": "cosine"}
     )
+    
+    current_count = collection.count()
+    print(f"📂 Connected to '{COLLECTION_NAME}'. Current movie count: {current_count}")
+    # --- UPDATED LOGIC END ---
 
     # B. Prep Data
     df = clean_and_prepare_data(DATA_PATH)
+    if df.empty:
+        return
     
     # C. Batch Processing
     batch_size = 500
     total_movies = len(df)
-    print(f"🚀 Starting ingestion of {total_movies} movies...")
+    print(f"🚀 Starting UPSERT (Merge/Update) of {total_movies} movies...")
 
     for i in range(0, total_movies, batch_size):
         batch = df.iloc[i : i + batch_size]
@@ -166,14 +171,12 @@ def build_vector_store():
                 "vote_count": int(row['vote_count']),
                 "poster_path": str(row['poster_path']),
                 "genres_display": str(row['genres_display']),
-                # Storing FULL text now for UI display
                 "overview": str(row['overview']),
                 "tagline": str(row['tagline']),
                 "adult": bool(row['adult']) 
             }
             
             # --- ONE-HOT ENCODING ---
-            # Used for hard filtering (e.g. "Action movies only")
             current_genre_ids = row['genre_ids']
             for genre_id in GENRE_ID_TO_NAME.keys():
                 meta[f"genre_{genre_id}"] = (genre_id in current_genre_ids)
@@ -182,19 +185,18 @@ def build_vector_store():
             documents.append(doc_text)
             metadatas.append(meta)
 
-        # DEBUG: Spot check the first item
-        if i == 0:
-            print(f"\n🔍 DEBUG: First Document Payload:\n{documents[0]}")
-            print(f"🔍 DEBUG: First Metadata Payload:\n{metadatas[0]}\n")
-
-        collection.add(
+        # --- UPDATED LOGIC: UPSERT ---
+        # upsert() will update existing IDs and insert new IDs.
+        collection.upsert(
             ids=ids,
             documents=documents,
             metadatas=metadatas
         )
-        print(f"   - Processed batch {i} to {i+len(batch)}")
+        print(f"   - Synced batch {i} to {i+len(batch)} (Upserted)")
 
-    print(f"✅ DONE! Collection '{COLLECTION_NAME}' built.")
+    final_count = collection.count()
+    print(f"✅ DONE! Collection '{COLLECTION_NAME}' is now up to date.")
+    print(f"📊 Total movies in database: {final_count} (Added/Updated: {final_count - current_count} new entries net change)")
 
 if __name__ == "__main__":
     build_vector_store()
