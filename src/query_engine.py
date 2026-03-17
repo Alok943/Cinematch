@@ -135,7 +135,12 @@ def _process_results(raw_results, boost_weight, final_k, query=""):
 
         # 4. Data Extraction
         # Ensure genre_ids is a list so app.py can map it
-        genre_ids = _parse_list_from_metadata(meta.get('genre_ids'))
+        genre_ids = [
+            gid for gid in [
+                28,12,16,35,80,99,18,10751,14,36,27,10402,9648,10749,878,10770,53,10752,37
+            ]
+            if meta.get(f"genre_{gid}") == True
+]
         
         # Clean overview text
         overview = meta.get('overview', '').strip()
@@ -177,21 +182,30 @@ def _fetch_popular_movies(filters, n_results):
     try:
         results = collection.get(
             where=where_clause,
-            limit=n_results * 2,
+            limit=500,
             include=['metadatas']
         )
-        
+        import random
+        combined = list(zip(results['ids'],results['metadatas']))
+        random.shuffle(combined)
+       
+        if not combined:
+            return[]
+        shuffled_ids,shuffled_metas = zip(*combined)
+        print(f"DEBUG: First 3 IDs after shuffle: {list(shuffled_ids)[:3]}") 
         # Mock wrapper to reuse _process_results logic
         mock_results = {
-            'ids': [results['ids']],
-            'metadatas': [results['metadatas']],
-            'distances': [[1.0] * len(results['ids'])]
+            'ids': [list(shuffled_ids)],
+            'metadatas':[list(shuffled_metas)],
+            'distances': [[1.0] * len(shuffled_ids)]
         }
         
-        processed = _process_results(mock_results, boost_weight=1.0, final_k=n_results, query="")
-        
+        processed = _process_results(mock_results, boost_weight=0.0, final_k=n_results, query="")
+      
+        random.shuffle(processed)
+        return processed[:n_results]
         # Explicit sort by vote count for popular view
-        processed.sort(key=lambda x: x['vote_count'], reverse=True)
+        #processed.sort(key=lambda x: x['vote_count'], reverse=True)
         return processed
         
     except Exception as e:
@@ -248,13 +262,13 @@ def find_similar_movies(movie_id, filters=None, n_results=20):
 
     try:
         movie_id_str = str(movie_id)
-        source = collection.get(ids=[movie_id_str], include=['embeddings'])
+        source = collection.get(ids=[movie_id_str], include=['documents'])
         
-        if not source.get('ids') or not source.get('embeddings'):
+        if not source.get('ids') or source.get('documents') is None:
             print(f"Error: Movie ID {movie_id_str} not found.")
             return []
-            
-        source_vector = source['embeddings'][0]
+        model = load_model()    
+        source_vector = model.encode(source['documents'][0]).tolist()
         
         filters = filters or {}
         where_clause = _build_where_clause(filters)

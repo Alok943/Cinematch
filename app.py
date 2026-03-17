@@ -3,10 +3,11 @@ import sys
 import os
 import time
 from ott_fetcher import get_watch_providers
+import re
 
 # --- PATH SETUP ---
 # Ensures we can import from the 'src' directory
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "src")))
 
 import chroma_manager
 import query_engine
@@ -16,20 +17,35 @@ st.set_page_config(
     page_title="Cinematch V2",
     page_icon="🎬",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 # --- GLOBAL CONSTANTS ---
 GENRE_MAP = {
-    28: "Action", 12: "Adventure", 16: "Animation", 35: "Comedy",
-    80: "Crime", 99: "Documentary", 18: "Drama", 10751: "Family",
-    14: "Fantasy", 36: "History", 27: "Horror", 10402: "Music",
-    9648: "Mystery", 10749: "Romance", 878: "Sci-Fi", 10770: "TV Movie",
-    53: "Thriller", 10752: "War", 37: "Western"
+    28: "Action",
+    12: "Adventure",
+    16: "Animation",
+    35: "Comedy",
+    80: "Crime",
+    99: "Documentary",
+    18: "Drama",
+    10751: "Family",
+    14: "Fantasy",
+    36: "History",
+    27: "Horror",
+    10402: "Music",
+    9648: "Mystery",
+    10749: "Romance",
+    878: "Sci-Fi",
+    10770: "TV Movie",
+    53: "Thriller",
+    10752: "War",
+    37: "Western",
 }
 
 # --- ENHANCED CSS STYLING ---
-st.markdown("""
+st.markdown(
+    """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap');
     
@@ -63,7 +79,7 @@ st.markdown("""
         display: flex;
         flex-direction: column;
         /* Min-height ensures alignment even if plot is short */
-        min-height: 540px; 
+        min-height: 580px; 
         margin-bottom: 20px;
         position: relative;
     }
@@ -193,14 +209,18 @@ st.markdown("""
         transition: transform 0.2s;
     }
 
-    details[open] summary::after {
-        content: " ▲"; /* Flips arrow when open */
-    }
-    
-    /* Hides default marker in Webkit browsers */
-    summary::-webkit-details-marker {
-        display: none;
-    }
+    .plot-section {
+    border-top: 1px solid rgba(255,255,255,0.1);
+    padding-top: 8px;
+    margin-bottom: 10px;
+}
+
+.plot-label {
+    color: #4CAF50;
+    font-weight: 600;
+    font-size: 0.85rem;
+    margin-bottom: 5px;
+}
     
     .overview-text {
         font-size: 0.8rem;
@@ -208,10 +228,23 @@ st.markdown("""
         background: rgba(0,0,0,0.2); /* Darker background for readability */
         padding: 10px;
         border-radius: 8px;
+        display:none;
         margin-top: 5px;
         color: #ddd;
     }
-
+    .read-more-btn {
+    background: none;
+    border: none;
+    color: #4CAF50;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 4px 0;
+    margin-top: 6px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    width: 100%;
+    text-align: left;
+}
     /* 9. STREAMLIT BUTTON OVERRIDE */
     .stButton > button {
         background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
@@ -241,54 +274,98 @@ st.markdown("""
         font-weight: 800;
         padding-bottom: 10px;
     }
+    /* OTT LOGO ROW */
+.ott-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    background: rgba(0,0,0,0.25);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    min-height: 44px;
+}
+
+.ott-logo {
+    width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    object-fit: cover;
+}
+
+.ott-none {
+    font-size: 0.7rem;
+    color: rgba(255,255,255,0.3);
+    padding: 2px 0;
+}
     </style>
-""", unsafe_allow_html=True)
+""",unsafe_allow_html=True
+)
 
 # --- HELPER FUNCTIONS ---
 
-if 'target_movie_id' not in st.session_state:
-    st.session_state['target_movie_id'] = None
+if "target_movie_id" not in st.session_state:
+    st.session_state["target_movie_id"] = None
 
-if 'search_cache' not in st.session_state:
-    st.session_state['search_cache'] = {}
+if "search_cache" not in st.session_state:
+    st.session_state["search_cache"] = {}
+
 
 def clear_target_movie():
-    st.session_state['target_movie_id'] = None
+    st.session_state["target_movie_id"] = None
+
 
 def set_target_movie(movie_id):
-    st.session_state['target_movie_id'] = movie_id
+    st.session_state["target_movie_id"] = movie_id
+
 
 def get_genre_names(genre_ids, max_genres=2):
     """Convert ID list to badge-friendly strings"""
-    if not genre_ids: 
+    if not genre_ids:
         return []
     names = [GENRE_MAP.get(gid, "") for gid in genre_ids[:max_genres]]
     return [n for n in names if n]
 
+
 def format_year(year):
     return str(year) if year and year > 1900 else "N/A"
+
 
 def render_movie_card(movie, idx, context="search"):
     """
     Renders a movie card with HTML structure and a unique button key.
     """
     # 1. Prepare Data
-    poster_path = movie.get('poster_path')
+    poster_path = movie.get("poster_path")
     if poster_path:
         if not poster_path.startswith("/"):
             poster_path = f"/{poster_path}"
         poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
     else:
         poster_url = "https://via.placeholder.com/500x750/1a1a2e/4CAF50?text=No+Poster"
-    
-    title = movie.get('title', 'Unknown Title')
-    year = format_year(movie.get('release_year'))
-    genres = get_genre_names(movie.get('genre_ids', []), max_genres=2)
-    vote_average = movie.get('vote_average', 0.0)
-    
+
+    providers = get_watch_providers(int(movie["id"]))
+    if providers:
+        logo_imgs = "".join(
+            [
+                f'<img src="{p["logo"]}" title="{p["name"]}" class="ott-logo">'
+                for p in providers
+            ]
+        )
+        ott_html = f'<div class="ott-row">{logo_imgs}</div>'
+    else:
+        ott_html = '<div class="ott-row"><span class="ott-none">Not available on streaming</span></div>'
+    title = movie.get("title", "Unknown Title")
+    year = format_year(movie.get("release_year"))
+    genres = get_genre_names(movie.get("genre_ids", []), max_genres=3)
+    vote_average = movie.get("vote_average", 0.0)
+
     # Clean overview to prevent broken HTML tags and escaping quotes
-    overview = movie.get('overview', 'No description available.')
-    overview = overview.replace('"', '&quot;').replace("'", "&#39;") 
+    overview = movie.get("overview", "No description available.")
+    overview = re.sub(r'<[^>]+>', '', overview)  # strip any HTML tags
+    overview = overview.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    overview = overview.replace('"', "&quot;").replace("'", "&#39;")
+    
     if len(overview) > 400:
         overview = overview[:400] + "..."
     
@@ -296,73 +373,89 @@ def render_movie_card(movie, idx, context="search"):
     badges_html = f'<span class="badge badge-year">{year}</span>'
     for g in genres:
         badges_html += f'<span class="badge">{g}</span>'
-
+    # Add this after your existing cleaning, before badges_html:
+    title_safe = title.replace('&', '&amp;').replace('"', '&quot;').replace("'", "&#39;").replace('<', '&lt;').replace('>', '&gt;')
     match_html = ""
-    if movie.get('score', 0) > 0:
-        match_pct = int(movie['score'] * 100)
-        match_html = f'<div class="match-score">{match_pct}% Match</div>'
-    
+    if movie.get("score", 0) > 0:
+        match_pct = min(int(movie["score"] * 100),99)
+        match_html = f'<span class="match-score">{match_pct}% Match</span>'
+
     # 2. Render HTML
-    # Note: We close the container div here, but visually the button below 
+    # Note: We close the container div here, but visually the button below
     # will appear to be part of the card due to CSS styling.
-    st.markdown(f"""
+    st.markdown(
+        f"""
     <div class="movie-card-container">
-        <div class="poster-div">
-            <img src="{poster_url}" class="poster-img" onerror="this.src='https://via.placeholder.com/500x750/1a1a2e/4CAF50?text=No+Poster'">
-        </div>
-        <div class="card-content">
-            <div class="movie-title" title="{title}">{title}</div>
-            <div class="badge-container">
-                {badges_html}
-            </div>
-            <div class="meta-row">
-                <div class="rating-badge">⭐ {vote_average}</div>
-                {match_html}
-            </div>
-            <details>
-                <summary>Read Plot</summary>
-                <div class="overview-text">
-                    {overview}
-                </div>
-            </details>
-        </div>
+    <div class="poster-div">
+    <img src="{poster_url}" class="poster-img" onerror="this.src='https://via.placeholder.com/500x750/1a1a2e/4CAF50?text=No+Poster'">
     </div>
-    """, unsafe_allow_html=True)
-    
+    {ott_html}
+    <div class="card-content">
+    <div class="movie-title" title="{title_safe}">{title_safe}</div>
+    <div class="badge-container">
+    {badges_html}
+    </div>
+    <div class="meta-row">
+    <div class="rating-badge">⭐ {vote_average}</div>
+    {match_html}
+    </div>
+    <button class="read-more-btn" onclick="
+            var ov = this.nextElementSibling;
+            if(ov.style.display === 'block'){{
+                ov.style.display='none';
+                this.innerText='Read Plot ▼';
+            }} else {{
+                ov.style.display='block';
+                this.innerText='Hide Plot ▲';
+            }}
+        ">Read Plot ▼</button>
+    <div class="overview-text">{overview}</div>
+    </div>
+    </div>
+    """,
+        unsafe_allow_html=True)
+
     # 3. Native Button (Only ONE call!)
     # We use 'context' to ensure keys are unique between Search and Recommendation views
     st.button(
-        "Find Similar 🔍", 
-        key=f"btn_{context}_{movie['id']}_{idx}", 
-        on_click=set_target_movie, 
-        args=(movie['id'],),
-        use_container_width=True
+        "Find Similar 🔍",
+        key=f"btn_{context}_{movie['id']}_{idx}",
+        on_click=set_target_movie,
+        args=(movie["id"],),
+        use_container_width=True,
     )
+
 
 # --- SIDEBAR FILTERS ---
 with st.sidebar:
     st.header("⚙️ Preferences")
-    
+
     # Form wrapper to prevent constant reloading
     with st.form("filter_form"):
         st.subheader("🎯 Refine Search")
-        
+
         GENRE_NAME_TO_ID = {v: k for k, v in GENRE_MAP.items()}
         selected_genres = st.multiselect(
-            "Genres", 
-            options=sorted(GENRE_NAME_TO_ID.keys()),
-            default=[]
+            "Genres", options=sorted(GENRE_NAME_TO_ID.keys()), default=[]
         )
         genre_ids = [GENRE_NAME_TO_ID[name] for name in selected_genres]
-        
+
         min_rating = st.slider("Min Rating", 0.0, 10.0, 5.0, 0.5)
         # Default range set wide to avoid "no results" error
         year_range = st.slider("Release Year", 1970, 2025, (1980, 2025))
-        
+
         with st.expander("🔧 Advanced Sorting"):
             n_results = st.number_input("Results Count", 4, 40, 8, step=4)
-            sort_by = st.selectbox("Sort By", ["relevance", "rating", "popularity", "newest"])
-            boost_weight = st.slider("Popularity Boost", 0.0, 1.0, 0.1, help="Increase to favor popular movies")
+            sort_by = st.selectbox(
+                "Sort By", ["relevance", "rating", "popularity", "newest"]
+            )
+            boost_weight = st.slider(
+                "Popularity Boost",
+                0.0,
+                1.0,
+                0.1,
+                help="Increase to favor popular movies",
+            )
 
         st.markdown("<br>", unsafe_allow_html=True)
         apply_btn = st.form_submit_button("Apply Filters", use_container_width=True)
@@ -380,9 +473,9 @@ with st.form("search_form"):
     col1, col2 = st.columns([0.85, 0.15])
     with col1:
         query = st.text_input(
-            "Search", 
-            placeholder="e.g., 'time travel paradox with a twist ending'...", 
-            label_visibility="collapsed"
+            "Search",
+            placeholder="e.g., 'time travel paradox with a twist ending'...",
+            label_visibility="collapsed",
         )
     with col2:
         search_submitted = st.form_submit_button("Search 🔍", use_container_width=True)
@@ -398,10 +491,10 @@ st.markdown("---")
 cache_key = f"{query}_{genre_ids}_{year_range}_{min_rating}_{boost_weight}_{sort_by}_{n_results}"
 
 with st.spinner("🎬 Analyzing thousands of movies..."):
-    
+
     # MODE 1: Target Movie Selected (Find Similar)
-    if st.session_state['target_movie_id']:
-        
+    if st.session_state["target_movie_id"]:
+
         # Back Button Logic
         c1, c2 = st.columns([0.8, 0.2])
         with c1:
@@ -410,87 +503,93 @@ with st.spinner("🎬 Analyzing thousands of movies..."):
             if st.button("✖ Clear Selection", use_container_width=True):
                 clear_target_movie()
                 st.rerun()
-        
+
         # 1. Try Strict Search
         results = query_engine.find_similar_movies(
-            movie_id=st.session_state['target_movie_id'],
+            movie_id=st.session_state["target_movie_id"],
             filters={
-                "genres": genre_ids, 
-                "year_range": year_range, 
-                "min_rating": min_rating
+                "genres": genre_ids,
+                "year_range": year_range,
+                "min_rating": min_rating,
             },
-            n_results=n_results
+            n_results=n_results,
         )
 
         # 2. Smart Fallback: If strict search fails, try broad search
         if not results:
-            st.warning(f"⚠️ No matches found with your strict filters (Year: {year_range}, Rating > {min_rating}). Showing unfiltered similar movies instead.")
-            results = query_engine.find_similar_movies(
-                movie_id=st.session_state['target_movie_id'],
-                filters={}, # Remove filters
-                n_results=n_results
+            st.warning(
+                f"⚠️ No matches found with your strict filters (Year: {year_range}, Rating > {min_rating}). Showing unfiltered similar movies instead."
             )
-            
+            results = query_engine.find_similar_movies(
+                movie_id=st.session_state["target_movie_id"],
+                filters={},  # Remove filters
+                n_results=n_results,
+            )
+
         header_text = "🎯 Because you liked that..."
 
     # MODE 2: Search / Explore
     else:
         # Check Cache (only if not forcing new filters)
-        if query and cache_key in st.session_state['search_cache'] and not apply_btn:
-            results = st.session_state['search_cache'][cache_key]
+        if query and cache_key in st.session_state["search_cache"] and not apply_btn:
+            results = st.session_state["search_cache"][cache_key]
         else:
             # Perform Search
             results = query_engine.search_movies(
                 query=query if query else "",
                 filters={
-                    "genres": genre_ids, 
-                    "year_range": year_range, 
-                    "min_rating": min_rating
+                    "genres": genre_ids,
+                    "year_range": year_range,
+                    "min_rating": min_rating,
                 },
                 boost_weight=boost_weight,
                 sort_by=sort_by,
-                n_results=n_results
+                n_results=n_results,
             )
-            
+
             # Smart Fallback for Search too
             if not results and query:
-                 st.warning("⚠️ No exact matches found. Broadening search parameters...")
-                 results = query_engine.search_movies(
+                st.warning("⚠️ No exact matches found. Broadening search parameters...")
+                results = query_engine.search_movies(
                     query=query,
-                    filters={}, # Remove strict filters
+                    filters={},  # Remove strict filters
                     boost_weight=boost_weight,
                     sort_by=sort_by,
-                    n_results=n_results
+                    n_results=n_results,
                 )
 
             # Update Cache
             if query:
-                st.session_state['search_cache'][cache_key] = results
-        
-        header_text = f"🔍 Results for '{query}'" if query else "🔥 Trending Recommendations"
+                st.session_state["search_cache"][cache_key] = results
+
+        header_text = (
+            f"🔍 Results for '{query}'" if query else "🔥 Trending Recommendations"
+        )
 
 
 # --- GRID DISPLAY ---
 st.subheader(header_text)
 
 # Initialize results if not already set (safety check)
-if 'results' not in locals():
+if "results" not in locals():
     results = []
 
 if not results:
-    if 'query' in locals() and query:
-        st.error("⚠️ No movies found even after broadening the search. Try a different search term.")
+    if "query" in locals() and query:
+        st.error(
+            "⚠️ No movies found even after broadening the search. Try a different search term."
+        )
     else:
         st.info("👋 Welcome! Search for a plot or topic to get started.")
 else:
     # 4 Columns Grid
     cols = st.columns(4, gap="medium")
-    
+
     # Determine context for key uniqueness
     # "rec" = Recommendations view (Target Movie Selected)
     # "search" = Standard Search view
-    current_context = "rec" if st.session_state.get('target_movie_id') else "search"
-    
+    current_context = "rec" if st.session_state.get("target_movie_id") else "search"
+
     for idx, movie in enumerate(results):
         with cols[idx % 4]:
             render_movie_card(movie, idx, context=current_context)
@@ -498,7 +597,7 @@ else:
 # --- FOOTER ---
 st.markdown(
     '<div style="text-align: center; color: rgba(255,255,255,0.5); font-size: 0.8rem;">'
-    'Cinematch AI V2.3 | Enhanced Semantic Search & Filtering'
-    '</div>', 
-    unsafe_allow_html=True
+    "Cinematch AI V2.3 | Enhanced Semantic Search & Filtering"
+    "</div>",
+    unsafe_allow_html=True,
 )
