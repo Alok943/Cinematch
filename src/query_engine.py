@@ -1,5 +1,4 @@
 import chromadb
-from thefuzz import fuzz
 from sentence_transformers import SentenceTransformer
 import streamlit as st
 from chroma_manager import get_collection
@@ -9,64 +8,46 @@ import ast
 import re
 import random
 
+TITLE_SEARCH_STOPWORDS = {"the", "a", "an", "of", "in", "on", "at", "to"}
 # Load model once and cache it
 @st.cache_resource
 def load_model():
     return SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
 
-def _rewrite_query(query):
-    """
-    Expands queries to improve semantic matching.
-    Handles Bollywood/Indian cinema detection + existing trap idioms.
-    """
-    if not query:
-        return query
-
-    query_lower = query.lower()
-
-    # Bollywood/Indian cinema detection
-    bollywood_keywords = [
-        'bollywood', 'hindi', 'indian', 'aparichit', 'dhoom',
-        'khan', 'bachchan', 'shahrukh', 'salman', 'aamir',
-        'desi', 'masala', 'filmi'
-    ]
-
-    if any(kw in query_lower for kw in bollywood_keywords):
-        query_lower = query_lower + " indian hindi bollywood cinema"
-
-    # Existing trap idioms
-    rewrites = {
-        "slow burn": "slow burn psychological tension atmospheric suspense character driven",
-        "marvel cinematic universe": "marvel superhero comic book avengers",
-        "crossover": "ensemble team-up multiple heroes working together",
-        "mind bending": "mind bending psychological twist surreal complex",
-    }
-
-    for trap, expansion in rewrites.items():
-        if trap in query_lower:
-            query_lower = query_lower.replace(trap, expansion)
-
-    return query_lower
-def _correct_query(query):
-    """
-    Attempts basic typo correction using fuzzy matching
-    against known movie-related terms.
-    """
-    KNOWN_TERMS = [
-        "bollywood", "hollywood", "action", "comedy", "thriller",
-        "romance", "horror", "drama", "animation", "documentary",
-        "science fiction", "adventure", "mystery", "fantasy"
-    ]
+@st.cache_resource
+@st.cache_resource
+def _get_all_titles():
+    from chroma_manager import get_collection
+    collection = get_collection()
+    if not collection:
+        return [], [], []
     
-    words = query.split()
-    corrected = []
-    for word in words:
-        best_match = max(KNOWN_TERMS, key=lambda t: fuzz.ratio(word.lower(), t))
-        if fuzz.ratio(word.lower(), best_match) > 80:
-            corrected.append(best_match)
-        else:
-            corrected.append(word)
-    return " ".join(corrected)
+    results = collection.get(
+        limit=collection.count(),
+        include=["metadatas"]
+    )
+    
+    ids = results["ids"]
+    titles = [m.get("title_lower", "") for m in results["metadatas"]]
+    languages = [m.get("original_language", "") for m in results["metadatas"]]
+    
+    return ids, titles, languages
+
+def _find_movie_by_title(query: str, preferred_language: str = None):
+    query_lower = query.lower().strip()
+    ids, titles, languages = _get_all_titles()
+    
+    first_match = None
+    
+    for i, title in enumerate(titles):
+        if query_lower in title:
+            if first_match is None:
+                first_match = ids[i]
+            if preferred_language and languages[i] == preferred_language:
+                return ids[i]
+    
+    return first_match
+
 def _build_where_clause(filters):
     """
     Constructs the ChromaDB metadata filter dict.
@@ -194,7 +175,12 @@ def _process_results(raw_results, boost_weight, final_k, query=""):
 
         # 3. Blended Score
         final_score = (normalized_sim * (1 - boost_weight)) + (norm_pop * boost_weight)
+        
 
+        if (query and len(query.strip().split()) <= 2 
+    and query.lower().strip() not in TITLE_SEARCH_STOPWORDS
+    and query.lower().strip() in meta.get('title', '').lower()):
+            final_score += 0.3
         # 4. Data Extraction — reconstruct genre_ids from one-hot metadata flags
         genre_ids = [
             gid for gid in [
@@ -300,7 +286,8 @@ def _fetch_popular_movies(filters, n_results,random_seed = 42):
     except Exception as e:
         print(f"Popular Fetch Error: {e}")
         return []
-
+def _is_title_query(query: str) -> bool:
+    return len(query.strip().split()) <= 4
 
 def search_movies(query, filters=None, boost_weight=0.0, sort_by="relevance", n_results=20,random_seed=42):
     filters = filters or {}
@@ -313,7 +300,14 @@ def search_movies(query, filters=None, boost_weight=0.0, sort_by="relevance", n_
     # CASE 1: Empty Query -> Popular
     if not query or query.strip() == "":
         return _fetch_popular_movies(filters, n_results,random_seed)
-
+    if _is_title_query(query):
+        preferred_lang = filters.get('language')
+        movie_id = _find_movie_by_title(query,preferred_language = preferred_lang)
+        print(f"DEBUG _is_title_query=True, movie_id={movie_id}")
+        if movie_id:
+            results = find_similar_movies(movie_id, filters=filters, n_results=n_results)
+            print(f"DEBUG find_similar returned {len(results)} results")
+            return results
     # CASE 2: Semantic Search
     collection = get_collection()
     if not collection:
@@ -324,11 +318,11 @@ def search_movies(query, filters=None, boost_weight=0.0, sort_by="relevance", n_
 
     try:
         # Apply query expansion to catch trap idioms before encoding
-        optimized_query = _rewrite_query(query)
-        query_vector = model.encode(optimized_query).tolist()
+        #optimized_query = _rewrite_query(query)
+        query_vector = model.encode(query).tolist()
 
         # fetch_k = 5x to ensure enough candidates survive the threshold gate
-        fetch_k = n_results * 5
+        fetch_k = n_results * 10
 
         results = collection.query(
             query_embeddings=[query_vector],
@@ -392,10 +386,19 @@ def find_similar_movies(movie_id, filters=None, boost_weight=0.0, n_results=20):
             include=['metadatas', 'distances']
         )
 
+        
         processed = _process_results(results, boost_weight=boost_weight, final_k=fetch_k, query="")
+        print(f"DEBUG find_similar processed count: {len(processed)}")
 
-        # Exclude the source movie itself from results
         filtered = [m for m in processed if str(m['id']) != movie_id_str]
+        print(f"DEBUG after self-exclusion: {len(filtered)}")
+
+        # Build source movie card
+        source_card = next((m for m in processed if str(m['id']) == movie_id_str), None)
+        if source_card:
+            source_card['is_source'] = True
+            return [source_card] + filtered[:n_results - 1]
+
         return filtered[:n_results]
 
     except Exception as e:

@@ -2,7 +2,7 @@ import streamlit as st
 import sys
 import os
 import time
-from ott_fetcher import get_watch_providers
+from ott_fetcher import get_watch_providers, get_trailer_key
 import re
 import random
 
@@ -311,7 +311,10 @@ if "target_movie_id" not in st.session_state:
 
 if "search_cache" not in st.session_state:
     st.session_state["search_cache"] = {}
-    
+
+if 'trailer_movie_id' not in st.session_state:
+    st.session_state['trailer_movie_id'] = None
+       
 if 'random_seed' not in st.session_state:
     st.session_state['random_seed'] = random.randint(0, 10000)
 
@@ -370,9 +373,11 @@ def render_movie_card(movie, idx, context="search"):
     # Add this after your existing cleaning, before badges_html:
     title_safe = title.replace('&', '&amp;').replace('"', '&quot;').replace("'", "&#39;").replace('<', '&lt;').replace('>', '&gt;')
     match_html = ""
-    if movie.get("score", 0) > 0:
-        match_pct = min(int(movie["score"] * 100),99)
-        match_html = f'<span class="match-score">{match_pct}% Match</span>'
+    if movie.get('is_source'):
+        match_html = f'<div class="match-score" style="background: linear-gradient(135deg, #2196F3, #1976D2);">Your Selection</div>'
+    elif movie.get('score', 0) > 0:
+        match_pct = int(movie['score'] * 100)
+        match_html = f'<div class="match-score">{match_pct}% Match</div>'
 
     # 2. Render HTML
     # Note: We close the container div here, but visually the button below
@@ -411,13 +416,22 @@ def render_movie_card(movie, idx, context="search"):
 
     # 3. Native Button (Only ONE call!)
     # We use 'context' to ensure keys are unique between Search and Recommendation views
-    st.button(
-        "Find Similar 🔍",
-        key=f"btn_{context}_{movie['id']}_{idx}",
-        on_click=set_target_movie,
-        args=(movie["id"],),
-        use_container_width=True,
-    )
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.button(
+            "Find Similar 🔍",
+            key=f"btn_{context}_{movie['id']}_{idx}",
+            on_click=set_target_movie,
+            args=(movie["id"],),
+            use_container_width=True,
+        )
+    with col_b:
+        st.button(
+            "Trailer 🎬",
+            key=f"trailer_{context}_{movie['id']}_{idx}",
+            on_click=lambda mid=movie['id']: st.session_state.update({'trailer_movie_id': mid}),
+            use_container_width=True
+        )
     if st.button("🎬 Streaming", key=f"ott_{context}_{movie['id']}_{idx}", use_container_width=True):
         providers = get_watch_providers(int(movie["id"]))
         if providers:
@@ -427,7 +441,7 @@ def render_movie_card(movie, idx, context="search"):
                     st.image(p["logo"], width=40)
                     st.caption(p["name"])
         else:
-            st.caption("Not on streaming")
+            st.caption("Not available for streaming in India")
 
 # --- SIDEBAR FILTERS ---
 with st.sidebar:
@@ -449,7 +463,7 @@ with st.sidebar:
         year_range = st.slider("Release Year", 1970, 2025, (1980, 2025))
 
         with st.expander("🔧 Advanced Sorting"):
-            n_results = st.number_input("Results Count", 4, 40, 8, step=4)
+            n_results = st.number_input("Results Count", 4, 40, 12, step=4)
             sort_by = st.selectbox(
                 "Sort By", ["relevance", "rating", "popularity", "newest"]
             )
@@ -536,7 +550,7 @@ with st.spinner("🎬 Analyzing thousands of movies..."):
     # MODE 2: Search / Explore
     else:
         # Check Cache (only if not forcing new filters)
-        if query and cache_key in st.session_state["search_cache"] and not apply_btn:
+        if query and cache_key in st.session_state["search_cache"] and not apply_btn and not query_engine._is_title_query(query):
             results = st.session_state["search_cache"][cache_key]
         else:
             # Perform Search
@@ -570,7 +584,32 @@ with st.spinner("🎬 Analyzing thousands of movies..."):
         header_text = (
             f"🔍 Results for '{query}'" if query else "🔥 Trending Recommendations"
         )
-
+# --- TRAILER MODAL ---
+if st.session_state['trailer_movie_id']:
+    trailer_movie_id = st.session_state['trailer_movie_id']
+    trailer_key = get_trailer_key(int(trailer_movie_id))
+    
+    if st.button("✖ Close Trailer", key="close_trailer", use_container_width=True):
+        st.session_state['trailer_movie_id'] = None
+        st.rerun()
+    
+    if trailer_key:
+        st.markdown(f"""
+        <div style="width: 100%; aspect-ratio: 16/9;">
+            <iframe
+                width="100%" height="100%"
+                src="https://www.youtube.com/embed/{trailer_key}?autoplay=1"
+                frameborder="0"
+                allow="autoplay; fullscreen"
+                allowfullscreen>
+            </iframe>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.warning("⚠️ No trailer found for this movie.")
+        st.session_state['trailer_movie_id'] = None
+    
+    st.stop()
 
 # --- GRID DISPLAY ---
 st.subheader(header_text)

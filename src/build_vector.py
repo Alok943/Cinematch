@@ -184,20 +184,27 @@ def build_vector_store():
             doc_text = generate_super_string(row)
             
             # --- METADATA PAYLOAD ---
+            _runtime = pd.to_numeric(row.get('runtime', 0), errors='coerce')
+            _popularity = pd.to_numeric(row.get('popularity', 0), errors='coerce')
             meta = {
-                "movie_id": int(row['id']),
-                "title": str(row['title']),
-                "release_year": int(row['release_year']),
-                "vote_average": float(row['vote_average']),
-                "vote_count": int(row['vote_count']),
-                "poster_path": str(row['poster_path']),
-                "genres_display": str(row['genres_display']),
-                # Storing FULL text now for UI display
-                "overview": str(row['overview']),
-                "tagline": str(row['tagline']),
-                "adult": bool(row['adult']),
-                "original_language": str(row.get('original_language', 'en'))  
-            }
+    "movie_id": int(row['id']),
+    "title": str(row['title']),
+    "title_lower": str(row['title']).lower().strip(),
+    "original_title_lower": str(row.get('original_title', '')).lower().strip(),
+    "release_year": int(row['release_year']),
+    "vote_average": float(row['vote_average']),
+    "vote_count": int(row['vote_count']),
+    "popularity": float(_popularity) if not pd.isna(_popularity) else 0.0,
+    "runtime": int(_runtime) if not pd.isna(_runtime) else 0,
+    "poster_path": str(row['poster_path']),
+    "genres_display": str(row['genres_display']),
+    "overview": str(row['overview']),
+    "tagline": str(row['tagline']),
+    "adult": bool(row['adult']),
+    "original_language": str(row.get('original_language', 'en')),
+    "production_countries": str(row.get('production_countries', '')),
+    "spoken_languages": str(row.get('spoken_languages', '')),
+}
             
             # --- ONE-HOT ENCODING ---
             # Used for hard filtering (e.g. "Action movies only")
