@@ -14,6 +14,23 @@ import chroma_manager
 
 import query_engine
 
+import urllib.request
+
+def download_db_if_needed():
+    db_path = "./chroma_db/chroma.sqlite3"
+    if not os.path.exists(db_path):
+        os.makedirs("./chroma_db", exist_ok=True)
+        st.info("⏳ Setting up database for first time... this takes 2-3 minutes.")
+        urllib.request.urlretrieve(
+            "https://huggingface.co/datasets/Alok8732/chroma.sqlite3/resolve/main/chroma.sqlite3",
+            db_path
+        )
+        st.success("✅ Database ready!")
+        st.cache_resource.clear()  # Force fresh client connection
+        st.rerun()
+
+download_db_if_needed()
+
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
     page_title="Cinematch V2",
@@ -594,6 +611,7 @@ if st.session_state['trailer_movie_id']:
         st.rerun()
     
     if trailer_key:
+        # Try embedding first
         st.markdown(f"""
         <div style="width: 100%; aspect-ratio: 16/9;">
             <iframe
@@ -605,6 +623,13 @@ if st.session_state['trailer_movie_id']:
             </iframe>
         </div>
         """, unsafe_allow_html=True)
+        
+        # Always show YouTube link as fallback
+        st.markdown(
+            f'<a href="https://www.youtube.com/watch?v={trailer_key}" target="_blank">'
+            f'▶ Watch on YouTube if video doesn\'t load</a>',
+            unsafe_allow_html=True
+        )
     else:
         st.warning("⚠️ No trailer found for this movie.")
         st.session_state['trailer_movie_id'] = None
