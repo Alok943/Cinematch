@@ -23,7 +23,8 @@ talks/
 .streamlit/
 
 # ChromaDB folders
-chroma_db/
+chroma_db1/
 chroma_db_chnagedModel/
 chroma_db_L6/
 chroma_db_L6a/
+chroma_db/
