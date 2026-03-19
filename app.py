@@ -4,12 +4,14 @@ import os
 import time
 from ott_fetcher import get_watch_providers
 import re
+import random
 
 # --- PATH SETUP ---
 # Ensures we can import from the 'src' directory
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "src")))
 
 import chroma_manager
+
 import query_engine
 
 # --- PAGE CONFIGURATION ---
@@ -309,7 +311,9 @@ if "target_movie_id" not in st.session_state:
 
 if "search_cache" not in st.session_state:
     st.session_state["search_cache"] = {}
-
+    
+if 'random_seed' not in st.session_state:
+    st.session_state['random_seed'] = random.randint(0, 10000)
 
 def clear_target_movie():
     st.session_state["target_movie_id"] = None
@@ -344,17 +348,7 @@ def render_movie_card(movie, idx, context="search"):
     else:
         poster_url = "https://via.placeholder.com/500x750/1a1a2e/4CAF50?text=No+Poster"
 
-    providers = get_watch_providers(int(movie["id"]))
-    if providers:
-        logo_imgs = "".join(
-            [
-                f'<img src="{p["logo"]}" title="{p["name"]}" class="ott-logo">'
-                for p in providers
-            ]
-        )
-        ott_html = f'<div class="ott-row">{logo_imgs}</div>'
-    else:
-        ott_html = '<div class="ott-row"><span class="ott-none">Not available on streaming</span></div>'
+    ott_html = ""  # Don't fetch upfront
     title = movie.get("title", "Unknown Title")
     year = format_year(movie.get("release_year"))
     genres = get_genre_names(movie.get("genre_ids", []), max_genres=3)
@@ -424,7 +418,16 @@ def render_movie_card(movie, idx, context="search"):
         args=(movie["id"],),
         use_container_width=True,
     )
-
+    if st.button("🎬 Streaming", key=f"ott_{context}_{movie['id']}_{idx}", use_container_width=True):
+        providers = get_watch_providers(int(movie["id"]))
+        if providers:
+            cols = st.columns(len(providers))
+            for i, p in enumerate(providers):
+                with cols[i]:
+                    st.image(p["logo"], width=40)
+                    st.caption(p["name"])
+        else:
+            st.caption("Not on streaming")
 
 # --- SIDEBAR FILTERS ---
 with st.sidebar:
@@ -441,6 +444,7 @@ with st.sidebar:
         genre_ids = [GENRE_NAME_TO_ID[name] for name in selected_genres]
 
         min_rating = st.slider("Min Rating", 0.0, 10.0, 5.0, 0.5)
+        language = st.selectbox("Language",options=["Any", "en", "hi", "fr", "ja", "ko", "es", "de"],index=0)
         # Default range set wide to avoid "no results" error
         year_range = st.slider("Release Year", 1970, 2025, (1980, 2025))
 
@@ -511,6 +515,7 @@ with st.spinner("🎬 Analyzing thousands of movies..."):
                 "genres": genre_ids,
                 "year_range": year_range,
                 "min_rating": min_rating,
+                "language": None if language == "Any" else language,
             },
             n_results=n_results,
         )
@@ -522,7 +527,7 @@ with st.spinner("🎬 Analyzing thousands of movies..."):
             )
             results = query_engine.find_similar_movies(
                 movie_id=st.session_state["target_movie_id"],
-                filters={},  # Remove filters
+                filters={"language": None if language == "Any" else language,},  # Remove filters
                 n_results=n_results,
             )
 
@@ -537,22 +542,22 @@ with st.spinner("🎬 Analyzing thousands of movies..."):
             # Perform Search
             results = query_engine.search_movies(
                 query=query if query else "",
-                filters={
-                    "genres": genre_ids,
-                    "year_range": year_range,
-                    "min_rating": min_rating,
-                },
+                filters={"genres": genre_ids,
+                        "year_range": year_range,
+                        "min_rating": min_rating,
+                        "language": None if language == "Any" else language,},
                 boost_weight=boost_weight,
                 sort_by=sort_by,
                 n_results=n_results,
-            )
+                random_seed=st.session_state['random_seed']  # ADD THIS
+)
 
             # Smart Fallback for Search too
             if not results and query:
                 st.warning("⚠️ No exact matches found. Broadening search parameters...")
                 results = query_engine.search_movies(
                     query=query,
-                    filters={},  # Remove strict filters
+                    filters={"language": None if language == "Any" else language,},  # Remove strict filters
                     boost_weight=boost_weight,
                     sort_by=sort_by,
                     n_results=n_results,

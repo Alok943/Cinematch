@@ -7,22 +7,17 @@ import time
 from datetime import datetime
 
 # --- CONFIGURATION ---
-# 🔑 PASTE YOUR TMDB API KEY HERE
-API_KEY = "9a7f2c468ef72e78bb6f619bea50488b"
-
-# File path
-FILE_PATH = "data/raw/movies_clean.csv"
+API_KEY     = "9a7f2c468ef72e78bb6f619bea50488b"
+BASE_PATH   = r"C:\Users\aloks\Desktop\Cinematch_V2\data\processed\movies_filtered.csv"
+NEW_PATH    = r"C:\Users\aloks\Desktop\Cinematch_V2\data\raw\movies_new.csv"
+OUTPUT_PATH = r"C:\Users\aloks\Desktop\Cinematch_V2\data\processed\movies_updated.csv"
 
 def get_session():
-    """
-    Creates a requests session with automatic retries.
-    Fixes the 'SSLError' and 'Max retries exceeded' issues.
-    """
     session = requests.Session()
     retry = Retry(
-        total=5,                # Try 5 times before failing
-        backoff_factor=1,       # Wait 1s, 2s, 4s... between retries
-        status_forcelist=[429, 500, 502, 503, 504], # Retry on these errors
+        total=5,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
     )
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("http://", adapter)
@@ -30,138 +25,156 @@ def get_session():
     return session
 
 def check_database_status():
-    """Checks the latest movie in the existing CSV."""
-    if not os.path.exists(FILE_PATH):
-        print(f"❌ File not found: {FILE_PATH}")
+    if not os.path.exists(BASE_PATH):
+        print(f"❌ File not found: {BASE_PATH}")
         return
-
     try:
-        df = pd.read_csv(FILE_PATH)
-        # Convert date column to datetime objects, handling errors
+        df = pd.read_csv(BASE_PATH)
         df['release_date'] = pd.to_datetime(df['release_date'], errors='coerce')
-        
-        # Drop rows where date is missing for accurate sorting
         valid_dates = df.dropna(subset=['release_date'])
-        
         if valid_dates.empty:
-            print("⚠️ Database has movies, but no valid release dates found.")
+            print("⚠️ No valid release dates found.")
             return
-
-        # Sort by date
-        latest = valid_dates.sort_values(by='release_date', ascending=False).iloc[0]
-        oldest = valid_dates.sort_values(by='release_date', ascending=True).iloc[0]
-        
+        latest = valid_dates.sort_values('release_date', ascending=False).iloc[0]
+        oldest = valid_dates.sort_values('release_date', ascending=True).iloc[0]
         print(f"\n📊 DATABASE REPORT")
         print(f"-------------------")
-        print(f"Total Movies:   {len(df):,}")
-        print(f"Oldest Movie:   {oldest['title']} ({oldest['release_date'].date()})")
-        print(f"Latest Movie:   {latest['title']} ({latest['release_date'].date()})")
+        print(f"Total Movies : {len(df):,}")
+        print(f"Oldest Movie : {oldest['title']} ({oldest['release_date'].date()})")
+        print(f"Latest Movie : {latest['title']} ({latest['release_date'].date()})")
         print(f"-------------------")
     except Exception as e:
-        print(f"⚠️ Error reading database: {e}")
+        print(f"⚠️ Error: {e}")
 
 def fetch_new_movies(pages_to_fetch=5):
-    """
-    Fetches Popular movies from TMDb with FULL metadata 
-    (keywords, taglines, genres) to match your schema.
-    """
     session = get_session()
-    print(f"\n🚀 Fetching {pages_to_fetch} pages of popular movies...")
-    
+    print(f"\n🚀 Fetching {pages_to_fetch} pages of new movies (last 6 months)...")
+
     new_movies = []
-    
-    # 1. Loop through pages
+
     for page in range(1, pages_to_fetch + 1):
-        url = f"https://api.themoviedb.org/3/movie/popular"
-        params = {"api_key": API_KEY, "language": "en-US", "page": page}
-        
+        url = "https://api.themoviedb.org/3/discover/movie"
+        params = {
+            "api_key": API_KEY,
+            "language": "en-US",
+            "page": page,
+            "primary_release_date.gte": "2025-09-01",
+            "primary_release_date.lte": "2026-03-18",
+            "sort_by": "primary_release_date.desc"
+        }
+
         try:
             response = session.get(url, params=params, timeout=10)
             if response.status_code != 200:
-                print(f"❌ Error fetching page {page}: {response.status_code}")
+                print(f"❌ Error on page {page}: {response.status_code}")
                 continue
-                
+
             results = response.json().get('results', [])
             print(f"   Processing Page {page}/{pages_to_fetch} ({len(results)} movies)...")
-            
+
             for movie in results:
                 movie_id = movie['id']
-                
-                # 🛑 DETAILS FETCH: Call specific ID to get keywords/tagline
                 details_url = f"https://api.themoviedb.org/3/movie/{movie_id}"
                 details_params = {"api_key": API_KEY, "append_to_response": "keywords"}
-                
+
                 try:
                     details_resp = session.get(details_url, params=details_params, timeout=5)
                     details = details_resp.json()
-                    
-                    # Extract Keywords
-                    k_list = [k['name'] for k in details.get('keywords', {}).get('keywords', [])]
-                    keywords_str = ", ".join(k_list)
-                    
-                    # Extract Genres
-                    g_list = [g['name'] for g in details.get('genres', [])]
-                    genres_str = ", ".join(g_list)
 
-                    # Build the EXACT row structure needed for movies_clean.csv
+                    k_list = [k['name'] for k in details.get('keywords', {}).get('keywords', [])]
+                    g_list = [g['name'] for g in details.get('genres', [])]
+
                     row = {
-                        "id": movie_id,
-                        "title": movie.get('title'),
-                        "overview": movie.get('overview'),
-                        "genres": genres_str,
+                        "id":           movie_id,
+                        "title":        movie.get('title'),
+                        "overview":     movie.get('overview'),
+                        "genres":       ", ".join(g_list),
                         "vote_average": movie.get('vote_average'),
-                        "vote_count": movie.get('vote_count'),
+                        "vote_count":   movie.get('vote_count'),
                         "release_date": movie.get('release_date'),
-                        "poster_path": movie.get('poster_path'),
-                        "tagline": details.get('tagline', ''),
-                        "keywords": keywords_str,
-                        "adult": movie.get('adult', False)
+                        "poster_path":  movie.get('poster_path'),
+                        "tagline":      details.get('tagline', ''),
+                        "keywords":     ", ".join(k_list),
+                        "adult":        movie.get('adult', False)
                     }
                     new_movies.append(row)
-                    
-                    # Small sleep to be nice to the API
                     time.sleep(0.38)
-                    
+
                 except Exception as e:
                     print(f"   Skipping movie ID {movie_id}: {e}")
 
         except Exception as e:
             print(f"❌ Connection error on page {page}: {e}")
 
-    # 2. Save Data
     if new_movies:
         new_df = pd.DataFrame(new_movies)
-        
-        # Load existing if available to append
-        if os.path.exists(FILE_PATH):
-            try:
-                existing_df = pd.read_csv(FILE_PATH)
-                # Combine and remove duplicates based on ID
-                combined_df = pd.concat([existing_df, new_df]).drop_duplicates(subset=['id'], keep='last')
-            except:
-                combined_df = new_df
-        else:
-            combined_df = new_df
-            
-        combined_df.to_csv(FILE_PATH, index=False)
-        print(f"\n✅ SUCCESS! Database updated.")
-        print(f"   Added/Updated {len(new_df)} movies.")
-        print(f"   Total movies now: {len(combined_df)}")
+        new_df.to_csv(NEW_PATH, index=False)
+        print(f"\n✅ Fetched {len(new_df)} new movies → saved to movies_new.csv")
     else:
         print("❌ No movies fetched.")
+def check_new_movies_status():
+    if not os.path.exists(NEW_PATH):
+        print(f"❌ movies_new.csv not found. Run option 2 first.")
+        return
+    try:
+        df = pd.read_csv(NEW_PATH)
+        df['release_date'] = pd.to_datetime(df['release_date'], errors='coerce')
+        valid = df.dropna(subset=['release_date'])
+        latest = valid.sort_values('release_date', ascending=False).iloc[0]
+        oldest = valid.sort_values('release_date', ascending=True).iloc[0]
+        print(f"\n📊 NEW MOVIES REPORT")
+        print(f"-------------------")
+        print(f"Total Fetched: {len(df):,}")
+        print(f"Oldest: {oldest['title']} ({oldest['release_date'].date()})")
+        print(f"Latest: {latest['title']} ({latest['release_date'].date()})")
+        print(f"-------------------")
+    except Exception as e:
+        print(f"⚠️ Error: {e}")
+def merge_datasets():
+    if not os.path.exists(BASE_PATH):
+        print(f"❌ Base file not found: {BASE_PATH}")
+        return
+    if not os.path.exists(NEW_PATH):
+        print(f"❌ New movies file not found. Run option 2 first.")
+        return
+
+    base_df = pd.read_csv(BASE_PATH)
+    new_df  = pd.read_csv(NEW_PATH)
+
+    before = len(base_df)
+    combined = pd.concat([base_df, new_df]).drop_duplicates(subset=['id'], keep='last')
+    after = len(combined)
+
+    combined.to_csv(OUTPUT_PATH, index=False)
+    print(f"\n✅ Merged!")
+    print(f"   Base movies    : {before:,}")
+    print(f"   New movies     : {len(new_df):,}")
+    print(f"   Total (deduped): {after:,}")
+    print(f"   Net new added  : {after - before:,}")
+    print(f"   Saved to       : movies_updated.csv")
 
 # --- MENU ---
 if __name__ == "__main__":
+    print("\n🎬 Cinematch Data Updater")
+    print("==========================")
     print("1. Check Latest Movie in DB")
-    print("2. Fetch New Popular Movies")
-    choice = input("Enter choice (1 or 2): ")
-    
+    print("2. Fetch New Movies (last 6 months)")
+    print("3. Merge → movies_updated.csv")
+    print("4. Check Fetched Movies")
+    choice = input("\nEnter choice (1, 2, 3 or 4): ")
+
     if choice == "1":
         check_database_status()
     elif choice == "2":
         try:
-            p_input = input("How many pages to fetch? (Default 5): ")
+            p_input = input("How many pages? (Default 5, max ~20 for 6 months): ")
             pages = int(p_input) if p_input.strip() else 5
             fetch_new_movies(pages)
         except ValueError:
-            print("Invalid number.")
+            print("❌ Invalid number.")
+    elif choice == "3":
+        merge_datasets()
+    elif choice == "4":          # ← ADD THIS
+        check_new_movies_status()
+    else:
+        print("❌ Invalid choice.")

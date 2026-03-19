@@ -9,7 +9,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Go UP one level ("..") to find the file in the project root
 # Adjust this path if your folder structure is different
-DATA_PATH = r"C:\Users\aloks\Desktop\Cinematch_V2\data\processed\movies_merged.csv"
+DATA_PATH = r"C:\Users\aloks\Desktop\Cinematch_V2\data\processed\movies_updated.csv"
 # DATA_PATH = os.path.join(SCRIPT_DIR, "..", "data", "processed", "movies_merged.csv")
 
 # --- CONFIGURATION ---

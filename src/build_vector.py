@@ -9,7 +9,8 @@ import os
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Go UP one level ("..") to find the file in the project root
-DATA_PATH = r"C:\Users\aloks\Desktop\Cinematch_V2\data\processed\movies_filtered.csv"
+DATA_PATH = r"C:\Users\aloks\Desktop\Cinematch_V2\data\processed\movies_updated.csv"
+
 # Example: If the CSV is in a 'data' folder one level up:
 # DATA_PATH = os.path.join(SCRIPT_DIR, "..", "data", "movies_merged.csv")
 # --- CONFIGURATION ---
@@ -60,17 +61,41 @@ def safe_get_genre_ids(x):
 
 def generate_super_string(row):
     """
-    Constructs the weighted string for embedding.
-    ORDER MATTERS: Title (x2) -> Genres -> Keywords -> Overview
+    Improved super-string with language, country and stronger genre/keyword weighting.
     """
+    # Language signal — critical for Bollywood
+    lang = str(row.get('original_language', '')).strip()
+    lang_str = ""
+    if lang == 'hi':
+        lang_str = "Hindi Bollywood Indian cinema. Hindi Bollywood Indian cinema. "
+    elif lang == 'ta':
+        lang_str = "Tamil Indian cinema. "
+    elif lang == 'te':
+        lang_str = "Telugu Indian cinema. "
+    elif lang not in ['en', '']:
+        lang_str = f"Foreign language {lang} cinema. "
+
+    # Original title signal — helps non-English movies
+    orig_title = str(row.get('original_title', '')).strip()
+    orig_str = f"Also known as: {orig_title}. " if orig_title and orig_title != row['title'] else ""
+
+    # Keywords repeated for emphasis
+    keywords = str(row.get('keywords', '')).strip()
+    keyword_str = f"Keywords: {keywords}. Keywords: {keywords}. " if keywords else ""
+
+    # Genres repeated for emphasis  
+    genres = str(row.get('genres_display', '')).strip()
+    genre_str = f"Genres: {genres}. Genres: {genres}. " if genres else ""
+
     return (
         f"Title: {row['title']}. Title: {row['title']}. "
-        f"Genres: {row['genres_display']}. "
-        f"Keywords: {row['keywords']}. "
+        f"{orig_str}"
+        f"{lang_str}"
+        f"{genre_str}"
+        f"{keyword_str}"
         f"Tagline: {row['tagline']}. "
         f"Overview: {row['overview']}"
     )
-
 def clean_and_prepare_data(csv_path):
     print("🧹 Loading and cleaning data...")
     df = pd.read_csv(csv_path, low_memory=False)
@@ -123,7 +148,7 @@ def build_vector_store():
     # A. Initialize Client
     client = chromadb.PersistentClient(path=PERSIST_DIR)
     embedding_func = embedding_functions.SentenceTransformerEmbeddingFunction(
-        model_name="all-MiniLM-L6-v2"
+        model_name="paraphrase-multilingual-MiniLM-L12-v2"
     )
 
     try:
@@ -135,6 +160,7 @@ def build_vector_store():
     collection = client.create_collection(
         name=COLLECTION_NAME,
         embedding_function=embedding_func,
+        
         metadata={"hnsw:space": "cosine"}
     )
 
@@ -169,7 +195,8 @@ def build_vector_store():
                 # Storing FULL text now for UI display
                 "overview": str(row['overview']),
                 "tagline": str(row['tagline']),
-                "adult": bool(row['adult']) 
+                "adult": bool(row['adult']),
+                "original_language": str(row.get('original_language', 'en'))  
             }
             
             # --- ONE-HOT ENCODING ---

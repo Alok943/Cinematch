@@ -18,3 +18,5 @@ models/
 
 #converstaions
 talks/
+.streamlit
+.env
