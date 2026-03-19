@@ -5,7 +5,12 @@ import time
 from ott_fetcher import get_watch_providers, get_trailer_key
 import re
 import random
-
+st.set_page_config(
+    page_title="Cinematch V2",
+    page_icon="🎬",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 # --- PATH SETUP ---
 # Ensures we can import from the 'src' directory
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "src")))
@@ -32,12 +37,7 @@ def download_db_if_needed():
 download_db_if_needed()
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(
-    page_title="Cinematch V2",
-    page_icon="🎬",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+
 
 # --- GLOBAL CONSTANTS ---
 GENRE_MAP = {
@@ -443,12 +443,13 @@ def render_movie_card(movie, idx, context="search"):
             use_container_width=True,
         )
     with col_b:
-        st.button(
-            "Trailer 🎬",
-            key=f"trailer_{context}_{movie['id']}_{idx}",
-            on_click=lambda mid=movie['id']: st.session_state.update({'trailer_movie_id': mid}),
-            use_container_width=True
-        )
+        if st.button(
+        "Trailer 🎬",
+        key=f"trailer_{context}_{movie['id']}_{idx}",
+        use_container_width=True
+    ):
+            st.session_state['trailer_movie_id'] = movie['id']
+            st.rerun()
     if st.button("🎬 Streaming", key=f"ott_{context}_{movie['id']}_{idx}", use_container_width=True):
         providers = get_watch_providers(int(movie["id"]))
         if providers:
@@ -559,6 +560,7 @@ with st.spinner("🎬 Analyzing thousands of movies..."):
             results = query_engine.find_similar_movies(
                 movie_id=st.session_state["target_movie_id"],
                 filters={"language": None if language == "Any" else language,},  # Remove filters
+                boost_weight=0.0,
                 n_results=n_results,
             )
 

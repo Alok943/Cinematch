@@ -356,50 +356,62 @@ def find_similar_movies(movie_id, filters=None, boost_weight=0.0, n_results=20):
     if not collection:
         return []
 
-    # FIX 1: Apply min_votes here too — same leakage risk in recommendations
     filters = filters or {}
     if 'min_votes' not in filters:
-        filters['min_votes'] = 50
+        print(f"DEBUG min_votes in filters: {filters.get('min_votes')}")
+        # Hindi/regional films have fewer votes — lower threshold
+        if filters.get('language') and filters['language'] != 'en':
+            filters['min_votes'] = 20
+        else:
+            filters['min_votes'] = 300
 
     try:
         movie_id_str = str(movie_id)
 
-        # Fetch pre-calculated embedding directly — no model load, no re-encoding
-        source = collection.get(ids=[movie_id_str], include=['embeddings'])
+        # Fetch metadata only — no embeddings fetch (chromadb Rust bug)
+        source_meta = collection.get(ids=[movie_id_str], include=['metadatas'])
 
-        if not source.get('ids') or source.get('embeddings') is None:
-            print(f"Error: Movie ID {movie_id_str} not found or has no embedding.")
+        if not source_meta.get('ids'):
+            print(f"Movie ID {movie_id_str} not found.")
             return []
 
-        source_vector = source['embeddings'][0]
+        meta = source_meta['metadatas'][0]
 
-        where_clause = _build_where_clause(filters)
+        # Auto-inject source movie's genres into filter if user hasn't selected any
+        if not filters.get('genres'):
+            if filters.get('language') and filters['language'] != 'en':
+                source_genre_ids = [
+                    gid for gid in [
+                    28, 12, 16, 35, 80, 99, 18, 10751, 14, 36, 27,
+                    10402, 9648, 10749, 878, 10770, 53, 10752, 37
+                ]
+                    if meta.get(f"genre_{gid}") == True
+                ]
+                if source_genre_ids:
+                    filters['genres'] = source_genre_ids
 
-        # FIX 2: Raise fetch pool from n_results+5 to n_results*5
-        # The threshold gate can cut many candidates — need a larger pool going in
-        fetch_k = n_results * 5
+        title = meta.get('title', '')
+        overview = meta.get('overview', '')
+        tagline = meta.get('tagline', '')
+        query_text = f"{title}. {tagline}. {overview}".strip()
 
-        results = collection.query(
-            query_embeddings=[source_vector],
-            n_results=fetch_k,
-            where=where_clause,
-            include=['metadatas', 'distances']
+        # Reuse search_movies — it works fine, no Rust query bug there
+        results = search_movies(
+            query=query_text,
+            filters=filters,
+            boost_weight=boost_weight,
+            n_results=n_results + 1,  # +1 to account for source movie
         )
 
-        
-        processed = _process_results(results, boost_weight=boost_weight, final_k=fetch_k, query="")
-        print(f"DEBUG find_similar processed count: {len(processed)}")
+        # Mark source card, put it first
+        source_card = next((m for m in results if str(m['id']) == movie_id_str), None)
+        others = [m for m in results if str(m['id']) != movie_id_str]
 
-        filtered = [m for m in processed if str(m['id']) != movie_id_str]
-        print(f"DEBUG after self-exclusion: {len(filtered)}")
-
-        # Build source movie card
-        source_card = next((m for m in processed if str(m['id']) == movie_id_str), None)
         if source_card:
             source_card['is_source'] = True
-            return [source_card] + filtered[:n_results - 1]
+            return [source_card] + others[:n_results - 1]
 
-        return filtered[:n_results]
+        return results[:n_results]
 
     except Exception as e:
         print(f"Find Similar Error: {e}")
