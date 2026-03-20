@@ -22,16 +22,15 @@ import query_engine
 import urllib.request
 
 def download_db_if_needed():
-    db_path = "./chroma_db/chroma.sqlite3"
+    db_path = "/tmp/chroma_db/chroma.sqlite3"
     if not os.path.exists(db_path):
-        os.makedirs("./chroma_db", exist_ok=True)
+        os.makedirs("/tmp/chroma_db", exist_ok=True)
         st.info("⏳ Setting up database for first time... this takes 2-3 minutes.")
         urllib.request.urlretrieve(
             "https://huggingface.co/datasets/Alok8732/chroma.sqlite3/resolve/main/chroma.sqlite3",
             db_path
         )
         st.success("✅ Database ready!")
-        st.cache_resource.clear()  # Force fresh client connection
         st.rerun()
 
 download_db_if_needed()
@@ -272,9 +271,9 @@ st.markdown(
         border-radius: 8px;
         font-weight: 600;
         width: 100%;
-        padding: 10px;
+        padding: 6px 4px;
         text-transform: uppercase;
-        font-size: 0.85rem;
+        font-size: 0.72rem;
         box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
         transition: all 0.3s ease;
     }
