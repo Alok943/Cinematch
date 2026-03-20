@@ -22,16 +22,21 @@ def _get_all_titles():
     if not collection:
         return [], [], []
     
-    results = collection.get(
-        limit=collection.count(),
-        include=["metadatas"]
-    )
-    
-    ids = results["ids"]
-    titles = [m.get("title_lower", "") for m in results["metadatas"]]
-    languages = [m.get("original_language", "") for m in results["metadatas"]]
-    
-    return ids, titles, languages
+    total = collection.count()
+    batch_size = 500
+    all_ids, all_titles, all_languages = [], [], []
+
+    for offset in range(0, total, batch_size):
+        results = collection.get(
+            limit=batch_size,
+            offset=offset,
+            include=["metadatas"]
+        )
+        all_ids.extend(results["ids"])
+        all_titles.extend([m.get("title_lower", "") for m in results["metadatas"]])
+        all_languages.extend([m.get("original_language", "") for m in results["metadatas"]])
+
+    return all_ids, all_titles, all_languages
 
 def _find_movie_by_title(query: str, preferred_language: str = None):
     query_lower = query.lower().strip()
