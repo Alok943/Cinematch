@@ -230,10 +230,9 @@ st.markdown(
     .overview-text {
         font-size: 0.8rem;
         line-height: 1.5;
-        background: rgba(0,0,0,0.2); /* Darker background for readability */
+        background: rgba(0,0,0,0.2); 
         padding: 10px;
         border-radius: 8px;
-        display:none;
         margin-top: 5px;
         color: #ddd;
     }
@@ -360,65 +359,60 @@ def render_movie_card(movie, idx, context="search"):
     genres = get_genre_names(movie.get("genre_ids", []), max_genres=3)
     vote_average = movie.get("vote_average", 0.0)
 
-    # Clean overview to prevent broken HTML tags and escaping quotes
+    # Clean overview
     overview = movie.get("overview", "No description available.")
-    overview = re.sub(r'<[^>]+>', '', overview)  # strip any HTML tags
+    overview = re.sub(r'<[^>]+>', '', overview) 
     overview = overview.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
     overview = overview.replace('"', "&quot;").replace("'", "&#39;")
     
     if len(overview) > 400:
         overview = overview[:400] + "..."
     
+    title_safe = title.replace('&', '&amp;').replace('"', '&quot;').replace("'", "&#39;").replace('<', '&lt;').replace('>', '&gt;')
+    
     # Generate Badge HTML
     badges_html = f'<span class="badge badge-year">{year}</span>'
     for g in genres:
         badges_html += f'<span class="badge">{g}</span>'
-    # Add this after your existing cleaning, before badges_html:
-    title_safe = title.replace('&', '&amp;').replace('"', '&quot;').replace("'", "&#39;").replace('<', '&lt;').replace('>', '&gt;')
+
     match_html = ""
-    if movie.get('is_source'):
+    if movie.get('is_top_result'):
+        match_html = f'<div class="match-score" style="background: linear-gradient(135deg, #FFD700, #FFA000); color: #000;">🏆 Top Result</div>'
+    elif movie.get('is_source'):
         match_html = f'<div class="match-score" style="background: linear-gradient(135deg, #2196F3, #1976D2);">Your Selection</div>'
+    
+    elif movie.get('is_top_rated'):
+        match_html = '<div class="match-score" style="background: linear-gradient(135deg, #FFD700, #FFA000); color: #000;">⭐ Top Rated</div>'
+    
     elif movie.get('score', 0) > 0:
-        match_pct = int(movie['score'] * 100)
+        match_pct = int(movie.get('score', 0) * 100)
         match_html = f'<div class="match-score">{match_pct}% Match</div>'
 
-    # 2. Render HTML
-    # Note: We close the container div here, but visually the button below
-    # will appear to be part of the card due to CSS styling.
-    st.markdown(
-        f"""
-    <div class="movie-card-container">
-    <div class="poster-div">
-    <img src="{poster_url}" class="poster-img" onerror="this.src='https://via.placeholder.com/500x750/1a1a2e/4CAF50?text=No+Poster'">
-    </div>
-    {ott_html}
-    <div class="card-content">
-    <div class="movie-title" title="{title_safe}">{title_safe}</div>
-    <div class="badge-container">
-    {badges_html}
-    </div>
-    <div class="meta-row">
-    <div class="rating-badge">⭐ {vote_average}</div>
-    {match_html}
-    </div>
-    <button class="read-more-btn" onclick="
-            var ov = this.nextElementSibling;
-            if(ov.style.display === 'block'){{
-                ov.style.display='none';
-                this.innerText='Read Plot ▼';
-            }} else {{
-                ov.style.display='block';
-                this.innerText='Hide Plot ▲';
-            }}
-        ">Read Plot ▼</button>
-    <div class="overview-text">{overview}</div>
-    </div>
-    </div>
-    """,
-        unsafe_allow_html=True)
+    # 2. Render HTML (Using <details> instead of JS)
+    html_content = f"""<div class="movie-card-container">
+<div class="poster-div">
+<img src="{poster_url}" class="poster-img" onerror="this.src='https://via.placeholder.com/500x750/1a1a2e/4CAF50?text=No+Poster'">
+</div>
+{ott_html}
+<div class="card-content">
+<div class="movie-title" title="{title_safe}">{title_safe}</div>
+<div class="badge-container">
+{badges_html}
+</div>
+<div class="meta-row">
+<div class="rating-badge">⭐ {vote_average}</div>
+{match_html}
+</div>
+<details>
+<summary style="font-size: 0.85rem;">Read Plot</summary>
+<div class="overview-text">{overview}</div>
+</details>
+</div>
+</div>"""
 
-    # 3. Native Button (Only ONE call!)
-    # We use 'context' to ensure keys are unique between Search and Recommendation views
+    st.markdown(html_content, unsafe_allow_html=True)
+
+    # 3. Native Buttons
     col_a, col_b = st.columns(2)
     with col_a:
         st.button(
@@ -429,13 +423,10 @@ def render_movie_card(movie, idx, context="search"):
             use_container_width=True,
         )
     with col_b:
-        if st.button(
-        "Trailer 🎬",
-        key=f"trailer_{context}_{movie['id']}_{idx}",
-        use_container_width=True
-    ):
+        if st.button("Trailer 🎬", key=f"trailer_{context}_{movie['id']}_{idx}", use_container_width=True):
             st.session_state['trailer_movie_id'] = movie['id']
             st.rerun()
+            
     if st.button("🎬 Streaming", key=f"ott_{context}_{movie['id']}_{idx}", use_container_width=True):
         providers = get_watch_providers(int(movie["id"]))
         if providers:
@@ -446,7 +437,6 @@ def render_movie_card(movie, idx, context="search"):
                     st.caption(p["name"])
         else:
             st.caption("Not available for streaming in India")
-
 # --- SIDEBAR FILTERS ---
 # --- SIDEBAR FILTERS ---
 with st.sidebar:
@@ -556,7 +546,8 @@ with st.spinner("🎬 Analyzing thousands of movies..."):
     # MODE 2: Search / Explore
     else:
         # Check Cache (only if not forcing new filters)
-        if query and cache_key in st.session_state["search_cache"] and not apply_btn and not query_engine._is_title_query(query):
+        # Check Cache (only if not forcing new filters)
+        if query and cache_key in st.session_state["search_cache"] and not apply_btn:
             results = st.session_state["search_cache"][cache_key]
         else:
             # Perform Search
@@ -639,18 +630,89 @@ if not results:
         )
     else:
         st.info("👋 Welcome! Search for a plot or topic to get started.")
-else:
-    # 4 Columns Grid
+# Handle structured results
+# 🔥 FIX: Normalize results to dict
+if isinstance(results, list):
+    results = {
+        "top_result": results[0] if results else None,
+        "similar": results[1:] if len(results) > 1 else [],
+        "top_rated": []
+    }
+top_result = results.get("top_result")
+similar = results.get("similar", [])
+top_rated = results.get("top_rated", [])
+
+# 🎬 Top Result
+if top_result:
+    st.subheader("🎬 Top Result")
+
+    col1, col2 = st.columns([1, 2.5])
+
+    with col1:
+        poster_path = top_result.get("poster_path")
+        if poster_path:
+            if not poster_path.startswith("/"):
+                poster_path = f"/{poster_path}"
+            poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
+        else:
+            poster_url = "https://via.placeholder.com/500x750"
+
+        st.image(poster_url, use_container_width=True)
+
+    with col2:
+        st.markdown(f"## {top_result['title']} ({top_result['release_year']})")
+
+        genres = get_genre_names(top_result.get("genre_ids", []), max_genres=3)
+        st.markdown("**Genres:** " + ", ".join(genres))
+
+        st.markdown(f"⭐ **Rating:** {top_result['vote_average']}")
+
+        st.markdown("### 📖 Overview")
+        st.markdown(
+    f"""
+    <div style="
+        background: rgba(0,0,0,0.25);
+        padding: 12px;
+        border-radius: 10px;
+        font-size: 0.9rem;
+        line-height: 1.5;
+    ">
+    {top_result.get("overview", "No description")}
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+        st.markdown("<br>", unsafe_allow_html=True)
+        # Buttons
+        c1, c2 = st.columns(2)
+        with c1:
+            st.button(
+                "Find Similar 🔍",
+                key=f"top_sim_{top_result['id']}",
+                on_click=set_target_movie,
+                args=(top_result["id"],),
+                use_container_width=True,
+            )
+        with c2:
+            if st.button("Trailer 🎬", key=f"top_trailer_{top_result['id']}", use_container_width=True):
+                st.session_state['trailer_movie_id'] = top_result['id']
+                st.rerun()
+
+# 🔥 Similar Movies
+if similar:
+    st.subheader("🔥 Similar Movies")
     cols = st.columns(4, gap="medium")
-
-    # Determine context for key uniqueness
-    # "rec" = Recommendations view (Target Movie Selected)
-    # "search" = Standard Search view
-    current_context = "rec" if st.session_state.get("target_movie_id") else "search"
-
-    for idx, movie in enumerate(results):
+    for idx, movie in enumerate(similar):
         with cols[idx % 4]:
-            render_movie_card(movie, idx, context=current_context)
+            render_movie_card(movie, idx, context="similar")
+
+# ⭐ Top Rated
+if top_rated:
+    st.subheader("⭐ Top Rated in this category")
+    cols = st.columns(4, gap="medium")
+    for idx, movie in enumerate(top_rated):
+        with cols[idx % 4]:
+            render_movie_card(movie, idx, context="toprated")
 
 # --- FOOTER ---
 st.markdown(
