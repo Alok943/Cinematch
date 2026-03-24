@@ -17,23 +17,11 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "src")))
 
 import chroma_manager
 
-import query_engine
+is_valid, db_status_msg = chroma_manager.validate_database()
+if not is_valid:
+    st.error(f"❌ Database not found. Please ensure `chroma_db/` is present in the project directory.\n\n`{db_status_msg}`")
+    st.stop()
 
-import urllib.request
-
-def download_db_if_needed():
-    db_path = "/tmp/chroma_db/chroma.sqlite3"
-    if not os.path.exists(db_path):
-        os.makedirs("/tmp/chroma_db", exist_ok=True)
-        st.info("⏳ Setting up database for first time... this takes 2-3 minutes.")
-        urllib.request.urlretrieve(
-            "https://huggingface.co/datasets/Alok8732/chroma.sqlite3/resolve/main/chroma.sqlite3",
-            db_path
-        )
-        st.success("✅ Database ready!")
-        st.rerun()
-
-download_db_if_needed()
 
 # --- PAGE CONFIGURATION ---
 

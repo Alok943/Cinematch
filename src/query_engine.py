@@ -15,7 +15,6 @@ def load_model():
     return SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
 
 @st.cache_resource
-@st.cache_resource
 def _get_all_titles():
     from chroma_manager import get_collection
     collection = get_collection()
