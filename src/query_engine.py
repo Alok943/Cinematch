@@ -41,16 +41,20 @@ def _find_movie_by_title(query: str, preferred_language: str = None):
     query_lower = query.lower().strip()
     ids, titles, languages = _get_all_titles()
     
-    first_match = None
-    
+    exact_match = None
+    partial_match = None
+
     for i, title in enumerate(titles):
-        if query_lower in title:
-            if first_match is None:
-                first_match = ids[i]
+        if title == query_lower:  # exact match first
             if preferred_language and languages[i] == preferred_language:
                 return ids[i]
-    
-    return first_match
+            if exact_match is None:
+                exact_match = ids[i]
+        elif query_lower in title:  # partial match fallback
+            if partial_match is None:
+                partial_match = ids[i]
+
+    return exact_match or partial_match
 
 def _build_where_clause(filters):
     """
@@ -295,7 +299,12 @@ def _is_title_query(query: str) -> bool:
 
 def search_movies(query, filters=None, boost_weight=0.0, sort_by="relevance", n_results=20,random_seed=42):
     filters = filters or {}
-
+    if _is_title_query(query):
+        preferred_lang = filters.get('language')
+        movie_id = _find_movie_by_title(query, preferred_language=preferred_lang)
+        # add temporarily in search_movies, after the movie_id line
+        meta = get_collection().get(ids=[str(movie_id)], include=['metadatas'])
+        print(f"DEBUG title matched to movie_id: {movie_id}")  # ADD THIS
     # FIX 1: Wire in min_votes=100 globally to kill 0-vote / 1-vote film leakage
     # Only apply the default if caller hasn't explicitly set it
     if 'min_votes' not in filters:
@@ -395,10 +404,12 @@ def find_similar_movies(movie_id, filters=None, boost_weight=0.0, n_results=20):
                     filters['genres'] = source_genre_ids
 
         title = meta.get('title', '')
-        overview = meta.get('overview', '')
+        #overview = meta.get('overview', '')
         tagline = meta.get('tagline', '')
-        query_text = f"{title}. {tagline}. {overview}".strip()
-
+        query_text = f"{title}. {tagline}".strip()
+        
+        print(f"DEBUG query_text: {query_text}")
+        print(f"DEBUG filters in find_similar: {filters}")
         # Reuse search_movies — it works fine, no Rust query bug there
         results = search_movies(
             query=query_text,

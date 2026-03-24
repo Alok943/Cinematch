@@ -5,6 +5,7 @@ import time
 from ott_fetcher import get_watch_providers, get_trailer_key
 import re
 import random
+
 st.set_page_config(
     page_title="Cinematch V2",
     page_icon="🎬",
@@ -16,14 +17,12 @@ st.set_page_config(
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "src")))
 
 import chroma_manager
+import query_engine
 
 is_valid, db_status_msg = chroma_manager.validate_database()
 if not is_valid:
     st.error(f"❌ Database not found. Please ensure `chroma_db/` is present in the project directory.\n\n`{db_status_msg}`")
     st.stop()
-
-
-# --- PAGE CONFIGURATION ---
 
 
 # --- GLOBAL CONSTANTS ---
@@ -449,10 +448,10 @@ def render_movie_card(movie, idx, context="search"):
             st.caption("Not available for streaming in India")
 
 # --- SIDEBAR FILTERS ---
+# --- SIDEBAR FILTERS ---
 with st.sidebar:
     st.header("⚙️ Preferences")
 
-    # Form wrapper to prevent constant reloading
     with st.form("filter_form"):
         st.subheader("🎯 Refine Search")
 
@@ -462,31 +461,33 @@ with st.sidebar:
         )
         genre_ids = [GENRE_NAME_TO_ID[name] for name in selected_genres]
 
-        min_rating = st.slider("Min Rating", 0.0, 10.0, 5.0, 0.5)
-        language = st.selectbox("Language",options=["Any", "en", "hi", "fr", "ja", "ko", "es", "de"],index=0)
-        # Default range set wide to avoid "no results" error
-        year_range = st.slider("Release Year", 1970, 2025, (1980, 2025))
+        min_rating = st.slider("Min Rating ⭐", 0.0, 10.0, 5.0, 0.5)
 
-        with st.expander("🔧 Advanced Sorting"):
-            n_results = st.number_input("Results Count", 4, 40, 12, step=4)
-            sort_by = st.selectbox(
-                "Sort By", ["relevance", "rating", "popularity", "newest"]
-            )
-            boost_weight = st.slider(
-                "Popularity Boost",
-                0.0,
-                1.0,
-                0.1,
-                help="Increase to favor popular movies",
-            )
+        language = st.selectbox(
+            "Language",
+            options=["Any", "en", "hi", "fr", "ja", "ko", "es", "de"],
+            index=0
+        )
+
+        sort_by = st.selectbox(
+            "Sort By",
+            ["relevance", "rating", "popularity", "newest"]
+        )
+
+        n_results = st.select_slider(
+            "Results Count",
+            options=[8, 12, 16, 20, 24],
+            value=12
+        )
 
         st.markdown("<br>", unsafe_allow_html=True)
-        apply_btn = st.form_submit_button("Apply Filters", use_container_width=True)
-
-    if st.button("🔄 Reset All", type="secondary", use_container_width=True):
+        apply_btn = st.form_submit_button("🎬 Apply", use_container_width=True)
+    # Fixed values after sidebar simplification
+    boost_weight = 0.1
+    year_range = (1900, 2025)
+    if st.button("🔄 Reset", type="secondary", use_container_width=True):
         clear_target_movie()
         st.rerun()
-
 # --- MAIN HERO & SEARCH ---
 st.title("🎬 Cinematch AI")
 st.markdown("##### Discover your next favorite movie with AI-powered recommendations")
@@ -511,8 +512,7 @@ st.markdown("---")
 # --- QUERY LOGIC ---
 
 # Create cache key
-cache_key = f"{query}_{genre_ids}_{year_range}_{min_rating}_{boost_weight}_{sort_by}_{n_results}"
-
+cache_key = f"{query}_{genre_ids}_{min_rating}_{sort_by}_{n_results}_{language}"
 with st.spinner("🎬 Analyzing thousands of movies..."):
 
     # MODE 1: Target Movie Selected (Find Similar)
