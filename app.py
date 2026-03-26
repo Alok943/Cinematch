@@ -2,9 +2,10 @@ import streamlit as st
 import sys
 import os
 import time
-from ott_fetcher import get_watch_providers, get_trailer_key
+from ott_fetcher import get_watch_providers, get_trailer_key, get_trailer_key_youtube
 import re
 import random
+
 st.set_page_config(
     page_title="Cinematch V2",
     page_icon="🎬",
@@ -16,26 +17,12 @@ st.set_page_config(
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "src")))
 
 import chroma_manager
-
 import query_engine
 
-import urllib.request
-
-def download_db_if_needed():
-    db_path = "/tmp/chroma_db/chroma.sqlite3"
-    if not os.path.exists(db_path):
-        os.makedirs("/tmp/chroma_db", exist_ok=True)
-        st.info("⏳ Setting up database for first time... this takes 2-3 minutes.")
-        urllib.request.urlretrieve(
-            "https://huggingface.co/datasets/Alok8732/chroma.sqlite3/resolve/main/chroma.sqlite3",
-            db_path
-        )
-        st.success("✅ Database ready!")
-        st.rerun()
-
-download_db_if_needed()
-
-# --- PAGE CONFIGURATION ---
+is_valid, db_status_msg = chroma_manager.validate_database()
+if not is_valid:
+    st.error(f"❌ Database not found. Please ensure `chroma_db/` is present in the project directory.\n\n`{db_status_msg}`")
+    st.stop()
 
 
 # --- GLOBAL CONSTANTS ---
@@ -73,11 +60,9 @@ st.markdown(
 
     /* 1. BACKGROUND ANIMATION */
     .stApp {
-        background: linear-gradient(-45deg, #0f0c29, #302b63, #24243e, #1a1a2e);
-        background-size: 400% 400%;
-        animation: gradientBG 20s ease infinite;
-        color: white;
-    }
+    background: radial-gradient(circle at 20% 20%, #1a1a2e, #0f0c29 40%, #000000 100%);
+    color: white;
+}
     
     @keyframes gradientBG {
         0% { background-position: 0% 50%; }
@@ -87,34 +72,32 @@ st.markdown(
 
     /* 2. CARD CONTAINER - The Fix for Alignment */
     .movie-card-container {
-        background: rgba(255, 255, 255, 0.08);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border-radius: 18px;
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        overflow: hidden;
-        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-        display: flex;
-        flex-direction: column;
-        /* Min-height ensures alignment even if plot is short */
-        min-height: 580px; 
-        margin-bottom: 20px;
-        position: relative;
-    }
+    background: rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(16px);
+    border-radius: 20px;
+    border: 1px solid rgba(0, 230, 118, 0.15);
+    overflow: hidden;
+    transition: all 0.35s ease;
+    display: flex;
+    flex-direction: column;
+    min-height:auto;
+    position: relative;
+}
 
-    .movie-card-container:hover {
-        transform: translateY(-8px);
-        border-color: rgba(76, 175, 80, 0.6);
-        box-shadow: 0 16px 48px rgba(76, 175, 80, 0.2);
-        background: rgba(255, 255, 255, 0.12);
-    }
+.movie-card-container:hover {
+    transform: translateY(-6px) scale(1.02);
+    border-color: rgba(0, 230, 118, 0.6);
+    box-shadow: 0 12px 40px rgba(0, 230, 118, 0.25);
+}
 
+    /* 3. POSTER IMAGE */
     /* 3. POSTER IMAGE */
     .poster-div {
         width: 100%;
         height: 320px;
         overflow: hidden;
         border-bottom: 1px solid rgba(255,255,255,0.1);
+        position: relative;
     }
     
     .poster-img {
@@ -127,7 +110,70 @@ st.markdown(
     .movie-card-container:hover .poster-img {
         transform: scale(1.08);
     }
+    /* TRAILER OVERLAY */
+.poster-div {
+    position: relative;
+}
 
+.trailer-overlay {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    border-radius: 0;
+    cursor: pointer;
+    z-index: 2;
+}
+
+.movie-card-container:hover .trailer-overlay {
+    opacity: 1;
+}
+
+.play-btn {
+    width: 56px;
+    height: 56px;
+    background: rgba(255,255,255,0.15);
+    border: 3px solid white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    backdrop-filter: blur(4px);
+    transition: transform 0.2s ease, background 0.2s ease;
+}
+.play-btn-hint {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 56px; height: 56px;
+    background: rgba(0,230,118,0.3);
+    border: 3px solid #00E676;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    color: white;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.poster-div:hover .play-btn-hint {
+    opacity: 1;
+}
+.movie-card-container:hover .play-btn {
+    transform: scale(1.1);
+    background: rgba(0, 230, 118, 0.3);
+    border-color: #00E676;
+}
     /* 4. CONTENT AREA */
     .card-content {
         padding: 15px;
@@ -157,25 +203,29 @@ st.markdown(
         flex-wrap: wrap;
         gap: 5px;
         margin-bottom: 12px;
+        height: 58px;      
         min-height: 25px;
     }
 
     .badge {
-        background: rgba(76, 175, 80, 0.2);
-        border: 1px solid rgba(76, 175, 80, 0.4);
-        color: #4CAF50;
-        padding: 2px 8px;
-        border-radius: 8px;
-        font-size: 0.7rem;
-        font-weight: 600;
-        text-transform: uppercase;
-    }
-    
-    .badge-year {
-        background: rgba(33, 150, 243, 0.2);
-        border-color: rgba(33, 150, 243, 0.4);
-        color: #2196F3;
-    }
+    background: rgba(0, 230, 118, 0.12);
+    border: 1px solid rgba(0, 230, 118, 0.5);
+    color: #00E676;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1.4;
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
+}
+
+.badge-year {
+    background: rgba(255, 215, 0, 0.12);
+    border-color: rgba(255, 215, 0, 0.6);
+    color: #FFD700;
+}
 
     /* 7. META ROW (Rating & Match) */
     .meta-row {
@@ -194,13 +244,14 @@ st.markdown(
     }
 
     .match-score {
-        background: linear-gradient(135deg, #4CAF50, #45a049);
-        color: white;
-        padding: 4px 10px;
-        border-radius: 12px;
-        font-weight: 700;
-        font-size: 0.75rem;
-    }
+    background: linear-gradient(135deg, #00E676, #00C853);
+    color: black;
+    padding: 4px 10px;
+    border-radius: 14px;
+    font-weight: 700;
+    font-size: 0.75rem;
+    box-shadow: 0 0 10px rgba(0, 230, 118, 0.6);
+}
 
    /* 8. OVERVIEW TOGGLE (Enhanced) */
     details {
@@ -243,10 +294,9 @@ st.markdown(
     .overview-text {
         font-size: 0.8rem;
         line-height: 1.5;
-        background: rgba(0,0,0,0.2); /* Darker background for readability */
+        background: rgba(0,0,0,0.2); 
         padding: 10px;
         border-radius: 8px;
-        display:none;
         margin-top: 5px;
         color: #ddd;
     }
@@ -265,33 +315,31 @@ st.markdown(
 }
     /* 9. STREAMLIT BUTTON OVERRIDE */
     .stButton > button {
-        background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        font-weight: 600;
-        width: 100%;
-        padding: 6px 4px;
-        text-transform: uppercase;
-        font-size: 0.72rem;
-        box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
-        transition: all 0.3s ease;
-    }
+    background: linear-gradient(135deg, #00E676, #00C853);
+    color: black;
+    border: none;
+    border-radius: 10px;
+    font-weight: 700;
+    width: 100%;
+    padding: 8px;
+    font-size: 0.8rem;
+    box-shadow: 0 4px 15px rgba(0, 230, 118, 0.3);
+    transition: all 0.25s ease;
+}
 
-    .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 16px rgba(76, 175, 80, 0.5);
-    }
+.stButton > button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 230, 118, 0.6);
+}
     
     /* 10. HEADER STYLE */
     h1 {
-        text-align: center;
-        background: linear-gradient(135deg, #4CAF50, #45a049, #FFD700);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-weight: 800;
-        padding-bottom: 10px;
-    }
+    text-align: center;
+    background: linear-gradient(135deg, #00E676, #FFD700);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 800;
+}
     /* OTT LOGO ROW */
 .ott-row {
     display: flex;
@@ -333,6 +381,9 @@ if 'trailer_movie_id' not in st.session_state:
        
 if 'random_seed' not in st.session_state:
     st.session_state['random_seed'] = random.randint(0, 10000)
+    
+if 'ott_movie_id' not in st.session_state:
+    st.session_state['ott_movie_id'] = None    
 
 def clear_target_movie():
     st.session_state["target_movie_id"] = None
@@ -373,98 +424,88 @@ def render_movie_card(movie, idx, context="search"):
     genres = get_genre_names(movie.get("genre_ids", []), max_genres=3)
     vote_average = movie.get("vote_average", 0.0)
 
-    # Clean overview to prevent broken HTML tags and escaping quotes
+    # Clean overview
     overview = movie.get("overview", "No description available.")
-    overview = re.sub(r'<[^>]+>', '', overview)  # strip any HTML tags
+    overview = re.sub(r'<[^>]+>', '', overview) 
     overview = overview.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
     overview = overview.replace('"', "&quot;").replace("'", "&#39;")
     
     if len(overview) > 400:
         overview = overview[:400] + "..."
     
+    title_safe = title.replace('&', '&amp;').replace('"', '&quot;').replace("'", "&#39;").replace('<', '&lt;').replace('>', '&gt;')
+    
     # Generate Badge HTML
     badges_html = f'<span class="badge badge-year">{year}</span>'
     for g in genres:
         badges_html += f'<span class="badge">{g}</span>'
-    # Add this after your existing cleaning, before badges_html:
-    title_safe = title.replace('&', '&amp;').replace('"', '&quot;').replace("'", "&#39;").replace('<', '&lt;').replace('>', '&gt;')
+
     match_html = ""
-    if movie.get('is_source'):
+    if movie.get('is_top_result'):
+        match_html = f'<div class="match-score" style="background: linear-gradient(135deg, #FFD700, #FFA000); color: #000;">🏆 Top Result</div>'
+    elif movie.get('is_source'):
         match_html = f'<div class="match-score" style="background: linear-gradient(135deg, #2196F3, #1976D2);">Your Selection</div>'
+    
+    elif movie.get('is_top_rated'):
+        match_html = '<div class="match-score" style="background: linear-gradient(135deg, #FFD700, #FFA000); color: #000;">⭐ Top Rated</div>'
+    
     elif movie.get('score', 0) > 0:
-        match_pct = int(movie['score'] * 100)
+        match_pct = int(movie.get('score', 0) * 100)
         match_html = f'<div class="match-score">{match_pct}% Match</div>'
 
-    # 2. Render HTML
-    # Note: We close the container div here, but visually the button below
-    # will appear to be part of the card due to CSS styling.
-    st.markdown(
-        f"""
-    <div class="movie-card-container">
-    <div class="poster-div">
-    <img src="{poster_url}" class="poster-img" onerror="this.src='https://via.placeholder.com/500x750/1a1a2e/4CAF50?text=No+Poster'">
-    </div>
-    {ott_html}
-    <div class="card-content">
-    <div class="movie-title" title="{title_safe}">{title_safe}</div>
-    <div class="badge-container">
-    {badges_html}
-    </div>
-    <div class="meta-row">
-    <div class="rating-badge">⭐ {vote_average}</div>
-    {match_html}
-    </div>
-    <button class="read-more-btn" onclick="
-            var ov = this.nextElementSibling;
-            if(ov.style.display === 'block'){{
-                ov.style.display='none';
-                this.innerText='Read Plot ▼';
-            }} else {{
-                ov.style.display='block';
-                this.innerText='Hide Plot ▲';
-            }}
-        ">Read Plot ▼</button>
-    <div class="overview-text">{overview}</div>
-    </div>
-    </div>
-    """,
-        unsafe_allow_html=True)
+    # 2. Render HTML (Using <details> instead of JS)
+    html_content = f"""<div class="movie-card-container">
+<div class="poster-div">
+<img src="{poster_url}" class="poster-img" onerror="this.src='https://via.placeholder.com/500x750/1a1a2e/4CAF50?text=No+Poster'">
+<div class="play-btn-hint">▶</div>
+</div>
 
-    # 3. Native Button (Only ONE call!)
-    # We use 'context' to ensure keys are unique between Search and Recommendation views
+{ott_html}
+<div class="card-content">
+<div class="movie-title" title="{title_safe}">{title_safe}</div>
+<div class="badge-container">
+{badges_html}
+</div>
+<div class="meta-row">
+<div class="rating-badge">⭐ {vote_average}</div>
+{match_html}
+</div>
+<details>
+<summary style="font-size: 0.85rem;">Read Plot</summary>
+<div class="overview-text">{overview}</div>
+</details>
+</div>
+</div>"""
+
+    st.markdown(html_content, unsafe_allow_html=True)
+    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+  # Trailer full width on top
+    if st.button("▶ Watch Trailer", key=f"trailer_{context}_{movie['id']}_{idx}", use_container_width=True):
+        st.session_state['trailer_movie_id'] = movie['id']
+        st.rerun()
+
     col_a, col_b = st.columns(2)
     with col_a:
         st.button(
-            "Find Similar 🔍",
+            "🔍 Similar",
             key=f"btn_{context}_{movie['id']}_{idx}",
             on_click=set_target_movie,
             args=(movie["id"],),
             use_container_width=True,
         )
     with col_b:
-        if st.button(
-        "Trailer 🎬",
-        key=f"trailer_{context}_{movie['id']}_{idx}",
-        use_container_width=True
-    ):
-            st.session_state['trailer_movie_id'] = movie['id']
+        if st.button("📺 Stream", key=f"ott_{context}_{movie['id']}_{idx}", use_container_width=True):
+            if st.session_state['ott_movie_id'] == movie['id']:
+                st.session_state['ott_movie_id'] = None
+            else:
+                st.session_state['ott_movie_id'] = movie['id']
             st.rerun()
-    if st.button("🎬 Streaming", key=f"ott_{context}_{movie['id']}_{idx}", use_container_width=True):
-        providers = get_watch_providers(int(movie["id"]))
-        if providers:
-            cols = st.columns(len(providers))
-            for i, p in enumerate(providers):
-                with cols[i]:
-                    st.image(p["logo"], width=40)
-                    st.caption(p["name"])
-        else:
-            st.caption("Not available for streaming in India")
-
+            
+# --- SIDEBAR FILTERS ---
 # --- SIDEBAR FILTERS ---
 with st.sidebar:
     st.header("⚙️ Preferences")
 
-    # Form wrapper to prevent constant reloading
     with st.form("filter_form"):
         st.subheader("🎯 Refine Search")
 
@@ -474,31 +515,33 @@ with st.sidebar:
         )
         genre_ids = [GENRE_NAME_TO_ID[name] for name in selected_genres]
 
-        min_rating = st.slider("Min Rating", 0.0, 10.0, 5.0, 0.5)
-        language = st.selectbox("Language",options=["Any", "en", "hi", "fr", "ja", "ko", "es", "de"],index=0)
-        # Default range set wide to avoid "no results" error
-        year_range = st.slider("Release Year", 1970, 2025, (1980, 2025))
+        min_rating = st.slider("Min Rating ⭐", 0.0, 10.0, 5.0, 0.5)
 
-        with st.expander("🔧 Advanced Sorting"):
-            n_results = st.number_input("Results Count", 4, 40, 12, step=4)
-            sort_by = st.selectbox(
-                "Sort By", ["relevance", "rating", "popularity", "newest"]
-            )
-            boost_weight = st.slider(
-                "Popularity Boost",
-                0.0,
-                1.0,
-                0.1,
-                help="Increase to favor popular movies",
-            )
+        language = st.selectbox(
+            "Language",
+            options=["Any", "en", "hi", "fr", "ja", "ko", "es", "de"],
+            index=0
+        )
+
+        sort_by = st.selectbox(
+            "Sort By",
+            ["relevance", "rating", "popularity", "newest"]
+        )
+
+        n_results = st.select_slider(
+            "Results Count",
+            options=[8, 12, 16, 20, 24],
+            value=12
+        )
 
         st.markdown("<br>", unsafe_allow_html=True)
-        apply_btn = st.form_submit_button("Apply Filters", use_container_width=True)
-
-    if st.button("🔄 Reset All", type="secondary", use_container_width=True):
+        apply_btn = st.form_submit_button("🎬 Apply", use_container_width=True)
+    # Fixed values after sidebar simplification
+    boost_weight = 0.1
+    year_range = (1900, 2025)
+    if st.button("🔄 Reset", type="secondary", use_container_width=True):
         clear_target_movie()
         st.rerun()
-
 # --- MAIN HERO & SEARCH ---
 st.title("🎬 Cinematch AI")
 st.markdown("##### Discover your next favorite movie with AI-powered recommendations")
@@ -523,8 +566,7 @@ st.markdown("---")
 # --- QUERY LOGIC ---
 
 # Create cache key
-cache_key = f"{query}_{genre_ids}_{year_range}_{min_rating}_{boost_weight}_{sort_by}_{n_results}"
-
+cache_key = f"{query}_{genre_ids}_{min_rating}_{sort_by}_{n_results}_{language}"
 with st.spinner("🎬 Analyzing thousands of movies..."):
 
     # MODE 1: Target Movie Selected (Find Similar)
@@ -568,7 +610,8 @@ with st.spinner("🎬 Analyzing thousands of movies..."):
     # MODE 2: Search / Explore
     else:
         # Check Cache (only if not forcing new filters)
-        if query and cache_key in st.session_state["search_cache"] and not apply_btn and not query_engine._is_title_query(query):
+        # Check Cache (only if not forcing new filters)
+        if query and cache_key in st.session_state["search_cache"] and not apply_btn:
             results = st.session_state["search_cache"][cache_key]
         else:
             # Perform Search
@@ -605,7 +648,19 @@ with st.spinner("🎬 Analyzing thousands of movies..."):
 # --- TRAILER MODAL ---
 if st.session_state['trailer_movie_id']:
     trailer_movie_id = st.session_state['trailer_movie_id']
-    trailer_key = get_trailer_key(int(trailer_movie_id))
+    
+    title = ""
+    year = None
+    # Try to get movie info for better YouTube search
+    from chroma_manager import get_movie_by_id
+    meta = get_movie_by_id(str(trailer_movie_id))
+    if meta:
+        title = meta.get("title", "")
+        year = meta.get("release_year")
+
+    trailer_key = get_trailer_key_youtube(title, year) if title else None
+    if not trailer_key:
+        trailer_key = get_trailer_key(int(trailer_movie_id))  # TMDB fallback       
     
     if st.button("✖ Close Trailer", key="close_trailer", use_container_width=True):
         st.session_state['trailer_movie_id'] = None
@@ -651,19 +706,115 @@ if not results:
         )
     else:
         st.info("👋 Welcome! Search for a plot or topic to get started.")
-else:
-    # 4 Columns Grid
+# Handle structured results
+# 🔥 FIX: Normalize results to dict
+if isinstance(results, list):
+    results = {
+        "top_result": results[0] if results else None,
+        "similar": results[1:] if len(results) > 1 else [],
+        "top_rated": []
+    }
+top_result = results.get("top_result")
+similar = results.get("similar", [])
+top_rated = results.get("top_rated", [])
+
+# 🎬 Top Result
+if top_result:
+    st.subheader("🎬 Top Result")
+
+    col1, col2 = st.columns([1, 2.5])
+
+    with col1:
+        poster_path = top_result.get("poster_path")
+        if poster_path:
+            if not poster_path.startswith("/"):
+                poster_path = f"/{poster_path}"
+            poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}"
+        else:
+            poster_url = "https://via.placeholder.com/500x750"
+
+        st.image(poster_url, use_container_width=True)
+
+    with col2:
+        st.markdown(f"## {top_result['title']} ({top_result['release_year']})")
+
+        genres = get_genre_names(top_result.get("genre_ids", []), max_genres=3)
+        st.markdown("**Genres:** " + ", ".join(genres))
+
+        st.markdown(f"⭐ **Rating:** {top_result['vote_average']}")
+
+        st.markdown("### 📖 Overview")
+        st.markdown(
+    f"""
+    <div style="
+        background: rgba(0,0,0,0.25);
+        padding: 12px;
+        border-radius: 10px;
+        font-size: 0.9rem;
+        line-height: 1.5;
+    ">
+    {top_result.get("overview", "No description")}
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+        st.markdown("<br>", unsafe_allow_html=True)
+        # Buttons
+        c1, c2 = st.columns(2)
+        with c1:
+            st.button(
+                "Find Similar 🔍",
+                key=f"top_sim_{top_result['id']}",
+                on_click=set_target_movie,
+                args=(top_result["id"],),
+                use_container_width=True,
+            )
+        with c2:
+            if st.button("Trailer 🎬", key=f"top_trailer_{top_result['id']}", use_container_width=True):
+                st.session_state['trailer_movie_id'] = top_result['id']
+                st.rerun()
+
+# 🔥 Similar Movies
+if similar:
+    st.subheader("🔥 Similar Movies")
     cols = st.columns(4, gap="medium")
-
-    # Determine context for key uniqueness
-    # "rec" = Recommendations view (Target Movie Selected)
-    # "search" = Standard Search view
-    current_context = "rec" if st.session_state.get("target_movie_id") else "search"
-
-    for idx, movie in enumerate(results):
+    for idx, movie in enumerate(similar):
         with cols[idx % 4]:
-            render_movie_card(movie, idx, context=current_context)
+            render_movie_card(movie, idx, context="similar")
+            if st.session_state.get('ott_movie_id') == movie['id']:
+                providers = get_watch_providers(int(movie["id"]))
+                if providers:
+                    ott_cols = st.columns(len(providers))
+                    for i, p in enumerate(providers):
+                        with ott_cols[i]:
+                            st.image(p["logo"], width=40)
+                            st.caption(p["name"])
+                else:
+                    st.caption("❌ Not available in India")
 
+                if st.button("✖ Close", key=f"close_ott_similar_{movie['id']}_{idx}", use_container_width=True):
+                    st.session_state['ott_movie_id'] = None
+                    st.rerun()
+# ⭐ Top Rated
+if top_rated:
+    st.subheader("⭐ Top Rated in this category")
+    cols = st.columns(4, gap="medium")
+    for idx, movie in enumerate(top_rated):
+        with cols[idx % 4]:
+            render_movie_card(movie, idx, context="toprated")
+            if st.session_state.get('ott_movie_id') == movie['id']:
+                providers = get_watch_providers(int(movie["id"]))
+                if providers:
+                    ott_cols = st.columns(len(providers))
+                    for i, p in enumerate(providers):
+                        with ott_cols[i]:
+                            st.image(p["logo"], width=40)
+                            st.caption(p["name"])
+                else:
+                    st.caption("❌ Not available in India")
+                if st.button("✖ Close", key=f"close_ott_toprated_{movie['id']}_{idx}", use_container_width=True):
+                    st.session_state['ott_movie_id'] = None
+                    st.rerun()
 # --- FOOTER ---
 st.markdown(
     '<div style="text-align: center; color: rgba(255,255,255,0.5); font-size: 0.8rem;">'

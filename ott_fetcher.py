@@ -10,6 +10,7 @@ REGION = "IN"
 
 # Use a string label, not the key itself
 TMDB_API_KEY = st.secrets["TMDB_API_KEY"]
+YOUTUBE_API_KEY = st.secrets["YOUTUBE_API_KEY"]
 @st.cache_data(ttl=3600)  # Cache for 1 hour
 def get_watch_providers(movie_id: int) -> list[dict]:
     """
@@ -45,6 +46,49 @@ def get_watch_providers(movie_id: int) -> list[dict]:
         print(f"OTT fetch error for movie {movie_id}: {e}")
         return []
     
+@st.cache_data(ttl=3600)
+def get_trailer_key_youtube(movie_title: str, release_year: int = None) -> str:
+    """
+    Searches YouTube Data API for a movie trailer.
+    Falls back to TMDB if not found.
+    """
+    query = f"{movie_title} official trailer"
+    if release_year:
+        query += f" {release_year}"
+
+    url = "https://www.googleapis.com/youtube/v3/search"
+    params = {
+        "part": "snippet",
+        "q": query,
+        "type": "video",
+        "maxResults": 3,
+        "key": YOUTUBE_API_KEY,
+        "videoDefinition": "high",
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=10, verify=False)
+        response.raise_for_status()
+        data = response.json()
+
+        items = data.get("items", [])
+        for item in items:
+            video_id = item["id"].get("videoId")
+            title_lower = item["snippet"]["title"].lower()
+            # Prefer results that mention 'trailer' in title
+            if video_id and "trailer" in title_lower:
+                return video_id
+
+        # Fallback: return first result regardless
+        if items:
+            return items[0]["id"].get("videoId")
+
+        return None
+
+    except Exception as e:
+        print(f"YouTube trailer fetch error for '{movie_title}': {e}")
+        return None
+       
 @st.cache_data(ttl=3600)
 def get_trailer_key(movie_id: int) -> str:
     """

@@ -1,38 +1,52 @@
 import chromadb
 import streamlit as st
 import os
-
-# --- PATH CONFIGURATION ---
-# ./chroma_db is FIRST — that's where app.py downloads the DB on Streamlit Cloud
-POSSIBLE_PATHS = [
-    "./chroma_db",
-    "./data/chroma",
-    "../data/chroma",
-    "../chroma_db",
-]
+import requests
 
 COLLECTION_NAME = "cine_match_v1"
+HF_URL = "https://huggingface.co/datasets/Alok8732/chroma.sqlite3/resolve/main/chroma.sqlite3"
+LOCAL_DIR = "./chroma_db"
+LOCAL_FILE = os.path.join(LOCAL_DIR, "chroma.sqlite3")
 
 
-def _resolve_chroma_path():
+def _download_db_from_hf():
     """
-    Resolves path at CALL TIME, not import time.
-    Critical because DB may be downloaded after this module loads.
+    Downloads chroma.sqlite3 from HuggingFace Dataset repo
+    into ./chroma_db/ if not already present.
     """
-    for path in POSSIBLE_PATHS:
-        if os.path.exists(path):
-            return path
-    return "./chroma_db"  # fallback matches download location in app.py
+    if os.path.exists(LOCAL_FILE):
+        print("ChromaDB already exists locally, skipping download.")
+        return True
+
+    os.makedirs(LOCAL_DIR, exist_ok=True)
+
+    print("Downloading ChromaDB from HuggingFace...")
+    try:
+        response = requests.get(HF_URL, stream=True, timeout=120)
+        response.raise_for_status()
+        with open(LOCAL_FILE, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        print("Download complete.")
+        return True
+    except Exception as e:
+        print(f"HF Download failed: {e}")
+        return False
 
 
 @st.cache_resource
 def get_client():
-    path = _resolve_chroma_path()
-    if not os.path.exists(path):
-        print(f"ChromaDB path not found: {path}")
+    """
+    Downloads DB from HF if needed, then connects PersistentClient.
+    Cached for the lifetime of the Streamlit session.
+    """
+    success = _download_db_from_hf()
+    if not success:
+        print("Could not download ChromaDB. Aborting.")
         return None
-    print(f"ChromaDB connecting at: {path}")
-    return chromadb.PersistentClient(path=path)
+
+    print(f"ChromaDB connecting at: {LOCAL_DIR}")
+    return chromadb.PersistentClient(path=LOCAL_DIR)
 
 
 def get_collection():
@@ -47,19 +61,18 @@ def get_collection():
 
 
 def validate_database():
-    path = _resolve_chroma_path()
-    if not os.path.exists(path):
-        return False, f"Database folder not found. Searched: {POSSIBLE_PATHS}"
+    if not os.path.exists(LOCAL_FILE):
+        return False, f"Database file not found at {LOCAL_FILE}"
 
     collection = get_collection()
     if collection is None:
-        return False, f"Collection '{COLLECTION_NAME}' not found inside {path}."
+        return False, f"Collection '{COLLECTION_NAME}' not found."
 
     count = collection.count()
     if count == 0:
         return False, "Collection exists but is empty."
 
-    return True, f"Connected to ChromaDB at {path}. Index contains {count:,} movies."
+    return True, f"Connected to ChromaDB at {LOCAL_DIR}. Index contains {count:,} movies."
 
 
 def get_collection_stats():
