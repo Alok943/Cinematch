@@ -267,8 +267,57 @@ def search_movies(query, filters=None, boost_weight=0.1, sort_by="relevance", n_
     collection = get_collection()
     if not collection: return []
 
+    # AFTER (random each session):
     if not query or query.strip() == "":
-        return _fetch_semantic_recs("epic blockbuster highly rated", collection, filters, boost_weight, n_results, min_similarity=0.10)
+        seed_queries = [
+    # Emotion-led
+    "emotional drama life changing journey",
+    "heartbreaking story loss and redemption",
+    "feel good uplifting inspiring story",
+    "bittersweet coming of age growing up",
+    "friendship loyalty trust betrayal",
+    "father son relationship emotional bond",
+    "mother daughter love sacrifice",
+    "grief healing moving on",
+
+    # Genre-led
+    "epic action adventure hero saves world",
+    "thrilling crime heist mystery suspense",
+    "romantic love story fate destiny",
+    "mind bending science fiction future",
+    "dark psychological thriller obsession",
+    "supernatural horror fear survival",
+    "dark comedy satire society absurd",
+    "family animation adventure fun",
+    "historical epic war sacrifice honor",
+    "western outlaw justice revenge desert",
+    "spy espionage secret mission betrayal",
+    "courtroom legal drama justice truth",
+    "sports underdog triumph victory",
+    "road trip self discovery freedom",
+
+    # Mood-led
+    "thought provoking philosophical meaning of life",
+    "visually stunning breathtaking cinematography",
+    "slow burn atmospheric tension dread",
+    "fast paced adrenaline non stop action",
+    "witty clever dialogue sharp writing",
+    "surreal dreamlike abstract reality",
+    "gritty realistic raw street life",
+    "wholesome gentle quiet beautiful",
+
+    # Setting-led
+    "space exploration astronaut cosmos",
+    "underwater ocean deep sea mystery",
+    "post apocalyptic survival wasteland",
+    "small town secrets dark past",
+    "big city ambition dreams success",
+    "jungle wilderness nature survival",
+    "cold war political intrigue",
+]
+        random.seed(random_seed)
+        chosen_query = random.choice(seed_queries)
+        return _fetch_semantic_recs(chosen_query, collection, filters, boost_weight, n_results, min_similarity=0.10)
 
     top_movie = _get_top_result_by_title(query, collection)
 

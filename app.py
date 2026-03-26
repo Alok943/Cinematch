@@ -2,7 +2,7 @@ import streamlit as st
 import sys
 import os
 import time
-from ott_fetcher import get_watch_providers, get_trailer_key
+from ott_fetcher import get_watch_providers, get_trailer_key, get_trailer_key_youtube
 import re
 import random
 
@@ -60,11 +60,9 @@ st.markdown(
 
     /* 1. BACKGROUND ANIMATION */
     .stApp {
-        background: linear-gradient(-45deg, #0f0c29, #302b63, #24243e, #1a1a2e);
-        background-size: 400% 400%;
-        animation: gradientBG 20s ease infinite;
-        color: white;
-    }
+    background: radial-gradient(circle at 20% 20%, #1a1a2e, #0f0c29 40%, #000000 100%);
+    color: white;
+}
     
     @keyframes gradientBG {
         0% { background-position: 0% 50%; }
@@ -74,34 +72,32 @@ st.markdown(
 
     /* 2. CARD CONTAINER - The Fix for Alignment */
     .movie-card-container {
-        background: rgba(255, 255, 255, 0.08);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border-radius: 18px;
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        overflow: hidden;
-        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-        display: flex;
-        flex-direction: column;
-        /* Min-height ensures alignment even if plot is short */
-        min-height: 580px; 
-        margin-bottom: 20px;
-        position: relative;
-    }
+    background: rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(16px);
+    border-radius: 20px;
+    border: 1px solid rgba(0, 230, 118, 0.15);
+    overflow: hidden;
+    transition: all 0.35s ease;
+    display: flex;
+    flex-direction: column;
+    min-height:auto;
+    position: relative;
+}
 
-    .movie-card-container:hover {
-        transform: translateY(-8px);
-        border-color: rgba(76, 175, 80, 0.6);
-        box-shadow: 0 16px 48px rgba(76, 175, 80, 0.2);
-        background: rgba(255, 255, 255, 0.12);
-    }
+.movie-card-container:hover {
+    transform: translateY(-6px) scale(1.02);
+    border-color: rgba(0, 230, 118, 0.6);
+    box-shadow: 0 12px 40px rgba(0, 230, 118, 0.25);
+}
 
+    /* 3. POSTER IMAGE */
     /* 3. POSTER IMAGE */
     .poster-div {
         width: 100%;
         height: 320px;
         overflow: hidden;
         border-bottom: 1px solid rgba(255,255,255,0.1);
+        position: relative;
     }
     
     .poster-img {
@@ -114,7 +110,70 @@ st.markdown(
     .movie-card-container:hover .poster-img {
         transform: scale(1.08);
     }
+    /* TRAILER OVERLAY */
+.poster-div {
+    position: relative;
+}
 
+.trailer-overlay {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    border-radius: 0;
+    cursor: pointer;
+    z-index: 2;
+}
+
+.movie-card-container:hover .trailer-overlay {
+    opacity: 1;
+}
+
+.play-btn {
+    width: 56px;
+    height: 56px;
+    background: rgba(255,255,255,0.15);
+    border: 3px solid white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    backdrop-filter: blur(4px);
+    transition: transform 0.2s ease, background 0.2s ease;
+}
+.play-btn-hint {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 56px; height: 56px;
+    background: rgba(0,230,118,0.3);
+    border: 3px solid #00E676;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    color: white;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.poster-div:hover .play-btn-hint {
+    opacity: 1;
+}
+.movie-card-container:hover .play-btn {
+    transform: scale(1.1);
+    background: rgba(0, 230, 118, 0.3);
+    border-color: #00E676;
+}
     /* 4. CONTENT AREA */
     .card-content {
         padding: 15px;
@@ -144,25 +203,29 @@ st.markdown(
         flex-wrap: wrap;
         gap: 5px;
         margin-bottom: 12px;
+        height: 58px;      
         min-height: 25px;
     }
 
     .badge {
-        background: rgba(76, 175, 80, 0.2);
-        border: 1px solid rgba(76, 175, 80, 0.4);
-        color: #4CAF50;
-        padding: 2px 8px;
-        border-radius: 8px;
-        font-size: 0.7rem;
-        font-weight: 600;
-        text-transform: uppercase;
-    }
-    
-    .badge-year {
-        background: rgba(33, 150, 243, 0.2);
-        border-color: rgba(33, 150, 243, 0.4);
-        color: #2196F3;
-    }
+    background: rgba(0, 230, 118, 0.12);
+    border: 1px solid rgba(0, 230, 118, 0.5);
+    color: #00E676;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1.4;
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
+}
+
+.badge-year {
+    background: rgba(255, 215, 0, 0.12);
+    border-color: rgba(255, 215, 0, 0.6);
+    color: #FFD700;
+}
 
     /* 7. META ROW (Rating & Match) */
     .meta-row {
@@ -181,13 +244,14 @@ st.markdown(
     }
 
     .match-score {
-        background: linear-gradient(135deg, #4CAF50, #45a049);
-        color: white;
-        padding: 4px 10px;
-        border-radius: 12px;
-        font-weight: 700;
-        font-size: 0.75rem;
-    }
+    background: linear-gradient(135deg, #00E676, #00C853);
+    color: black;
+    padding: 4px 10px;
+    border-radius: 14px;
+    font-weight: 700;
+    font-size: 0.75rem;
+    box-shadow: 0 0 10px rgba(0, 230, 118, 0.6);
+}
 
    /* 8. OVERVIEW TOGGLE (Enhanced) */
     details {
@@ -251,33 +315,31 @@ st.markdown(
 }
     /* 9. STREAMLIT BUTTON OVERRIDE */
     .stButton > button {
-        background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        font-weight: 600;
-        width: 100%;
-        padding: 6px 4px;
-        text-transform: uppercase;
-        font-size: 0.72rem;
-        box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
-        transition: all 0.3s ease;
-    }
+    background: linear-gradient(135deg, #00E676, #00C853);
+    color: black;
+    border: none;
+    border-radius: 10px;
+    font-weight: 700;
+    width: 100%;
+    padding: 8px;
+    font-size: 0.8rem;
+    box-shadow: 0 4px 15px rgba(0, 230, 118, 0.3);
+    transition: all 0.25s ease;
+}
 
-    .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 16px rgba(76, 175, 80, 0.5);
-    }
+.stButton > button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 230, 118, 0.6);
+}
     
     /* 10. HEADER STYLE */
     h1 {
-        text-align: center;
-        background: linear-gradient(135deg, #4CAF50, #45a049, #FFD700);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-weight: 800;
-        padding-bottom: 10px;
-    }
+    text-align: center;
+    background: linear-gradient(135deg, #00E676, #FFD700);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 800;
+}
     /* OTT LOGO ROW */
 .ott-row {
     display: flex;
@@ -319,6 +381,9 @@ if 'trailer_movie_id' not in st.session_state:
        
 if 'random_seed' not in st.session_state:
     st.session_state['random_seed'] = random.randint(0, 10000)
+    
+if 'ott_movie_id' not in st.session_state:
+    st.session_state['ott_movie_id'] = None    
 
 def clear_target_movie():
     st.session_state["target_movie_id"] = None
@@ -392,7 +457,9 @@ def render_movie_card(movie, idx, context="search"):
     html_content = f"""<div class="movie-card-container">
 <div class="poster-div">
 <img src="{poster_url}" class="poster-img" onerror="this.src='https://via.placeholder.com/500x750/1a1a2e/4CAF50?text=No+Poster'">
+<div class="play-btn-hint">▶</div>
 </div>
+
 {ott_html}
 <div class="card-content">
 <div class="movie-title" title="{title_safe}">{title_safe}</div>
@@ -411,32 +478,29 @@ def render_movie_card(movie, idx, context="search"):
 </div>"""
 
     st.markdown(html_content, unsafe_allow_html=True)
+    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+  # Trailer full width on top
+    if st.button("▶ Watch Trailer", key=f"trailer_{context}_{movie['id']}_{idx}", use_container_width=True):
+        st.session_state['trailer_movie_id'] = movie['id']
+        st.rerun()
 
-    # 3. Native Buttons
     col_a, col_b = st.columns(2)
     with col_a:
         st.button(
-            "Find Similar 🔍",
+            "🔍 Similar",
             key=f"btn_{context}_{movie['id']}_{idx}",
             on_click=set_target_movie,
             args=(movie["id"],),
             use_container_width=True,
         )
     with col_b:
-        if st.button("Trailer 🎬", key=f"trailer_{context}_{movie['id']}_{idx}", use_container_width=True):
-            st.session_state['trailer_movie_id'] = movie['id']
+        if st.button("📺 Stream", key=f"ott_{context}_{movie['id']}_{idx}", use_container_width=True):
+            if st.session_state['ott_movie_id'] == movie['id']:
+                st.session_state['ott_movie_id'] = None
+            else:
+                st.session_state['ott_movie_id'] = movie['id']
             st.rerun()
             
-    if st.button("🎬 Streaming", key=f"ott_{context}_{movie['id']}_{idx}", use_container_width=True):
-        providers = get_watch_providers(int(movie["id"]))
-        if providers:
-            cols = st.columns(len(providers))
-            for i, p in enumerate(providers):
-                with cols[i]:
-                    st.image(p["logo"], width=40)
-                    st.caption(p["name"])
-        else:
-            st.caption("Not available for streaming in India")
 # --- SIDEBAR FILTERS ---
 # --- SIDEBAR FILTERS ---
 with st.sidebar:
@@ -584,7 +648,19 @@ with st.spinner("🎬 Analyzing thousands of movies..."):
 # --- TRAILER MODAL ---
 if st.session_state['trailer_movie_id']:
     trailer_movie_id = st.session_state['trailer_movie_id']
-    trailer_key = get_trailer_key(int(trailer_movie_id))
+    
+    title = ""
+    year = None
+    # Try to get movie info for better YouTube search
+    from chroma_manager import get_movie_by_id
+    meta = get_movie_by_id(str(trailer_movie_id))
+    if meta:
+        title = meta.get("title", "")
+        year = meta.get("release_year")
+
+    trailer_key = get_trailer_key_youtube(title, year) if title else None
+    if not trailer_key:
+        trailer_key = get_trailer_key(int(trailer_movie_id))  # TMDB fallback       
     
     if st.button("✖ Close Trailer", key="close_trailer", use_container_width=True):
         st.session_state['trailer_movie_id'] = None
@@ -705,7 +781,20 @@ if similar:
     for idx, movie in enumerate(similar):
         with cols[idx % 4]:
             render_movie_card(movie, idx, context="similar")
+            if st.session_state.get('ott_movie_id') == movie['id']:
+                providers = get_watch_providers(int(movie["id"]))
+                if providers:
+                    ott_cols = st.columns(len(providers))
+                    for i, p in enumerate(providers):
+                        with ott_cols[i]:
+                            st.image(p["logo"], width=40)
+                            st.caption(p["name"])
+                else:
+                    st.caption("❌ Not available in India")
 
+                if st.button("✖ Close", key=f"close_ott_similar_{movie['id']}_{idx}", use_container_width=True):
+                    st.session_state['ott_movie_id'] = None
+                    st.rerun()
 # ⭐ Top Rated
 if top_rated:
     st.subheader("⭐ Top Rated in this category")
@@ -713,7 +802,19 @@ if top_rated:
     for idx, movie in enumerate(top_rated):
         with cols[idx % 4]:
             render_movie_card(movie, idx, context="toprated")
-
+            if st.session_state.get('ott_movie_id') == movie['id']:
+                providers = get_watch_providers(int(movie["id"]))
+                if providers:
+                    ott_cols = st.columns(len(providers))
+                    for i, p in enumerate(providers):
+                        with ott_cols[i]:
+                            st.image(p["logo"], width=40)
+                            st.caption(p["name"])
+                else:
+                    st.caption("❌ Not available in India")
+                if st.button("✖ Close", key=f"close_ott_toprated_{movie['id']}_{idx}", use_container_width=True):
+                    st.session_state['ott_movie_id'] = None
+                    st.rerun()
 # --- FOOTER ---
 st.markdown(
     '<div style="text-align: center; color: rgba(255,255,255,0.5); font-size: 0.8rem;">'
